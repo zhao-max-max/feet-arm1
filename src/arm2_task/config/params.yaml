@@ -1,0 +1,213 @@
+---
+/**:
+  ros__parameters:
+
+    #相机安装位置
+    camera_extrinsics:
+      child_frame: camera_link
+      parent_frame: Link_4
+      #pos: [-0.071470, -0.103035, 0.027404]
+      #quat: [0.02799937, 0.69705640, -0.00605161, 0.71644385]
+      pos: [-0.031763, -0.090418, 0.041408]
+      quat: [0.04806441, 0.69986392, -0.06693250, 0.70950712]
+
+    # 狗头相机外参（待标定，当前全部为占位值）
+    # 描述：dog_camera_link 相对 arm 基座（world）的位置和旋转
+    # 机械臂固定在机器狗上，arm_base = world 原点
+    # 因此只需标定狗头相机相对机械臂基座的静态变换即可，无需依赖狗体 TF
+    # pos:  狗头相机光心相对机械臂基座的位置 (m)，xyz
+    # quat: 狗头相机相对机械臂基座的旋转，格式 [qx, qy, qz, qw]
+    dog_camera_extrinsics:
+      parent_frame: world          # arm_base = world，不依赖狗体 TF
+      child_frame:  dog_camera_link
+      pos: [0.101263, 0.046662, -0.032759]       # 标定代码标定好的
+      quat:  [-0.57775393, 0.64149970, -0.36065040, 0.35300115] #标定代码标定好的
+  
+
+
+    # 动力学与摩擦力补偿参数
+    # tau_f = fc * tanh(alpha * dq) + fv * dq
+    dynamics:
+      friction:
+        GearRatio: [10.0, 30.0, 30.0, 7.0, 7.0]
+        alpha: 80.0
+        fc: [0.25, 0.7, 0.25, 0.07, 0.05]
+        fv: [0.00026634, 0.00013977, 0.00028228, 0.00012035, 0.00013322]
+      joints: ["Yaw_joint", "Pitch_1", "Pitch_2", "pitch_3", "roll"]
+    # 关节空间控制器 PD 参数
+   # 四套 PD 参数组
+    gains:
+      #2. 纯重力补偿模式 (GRAVITY_COMP): 极低 PD,主要靠动力学模型抵消重力,实现“透明”手感或零力示教
+      gravity_comp:
+        kd: [1.0, 2.5, 0.8, 0.2, 0.02]
+        kp: [2.0, 8.5, 3.0, 1.2, 0.1]
+      # 1. 待机模式 (IDLE): 低增益，防止电机高频振动发热，允许手动推过
+      idle:
+        kd: [0.5, 0.5, 0.5, 0.2, 0.1]
+        kp: [1.0, 2.0, 1.0, 0.5, 0.0]
+      #4. 负载模式 (LOADED): 高增益，应对抓取 500g 负载后的惯量增加，提高刚性减少静差
+      loaded:
+        kd: [3.0, 8.5, 3.0, 3.2, 0.1]         # 之前是8.0
+        kp: [10.0, 20.0, 12.0, 8.5, 0.6]
+      #3. 运动模式 (MOVING): 标准增益，兼顾响应速度和稳定性，用于瞭望、俯瞰等空载移动
+      moving:
+        kd: [2.2, 4.0, 1.5, 2.2, 0.1]
+        kp: [8.5, 15.0, 8.0, 8.2, 0.5]
+      teach_pendant:
+        kd: [1.0, 4.0, 1.5, 0.1, 0.1]
+        kp: [3.5, 15.0, 8.0, 1.2, 0.5]
+      teach_drag:
+        kd: [0.15, 0.80, 0.35, 0.12, 0.05]
+        kp: [0.00, 0.25, 0.15, 0.08, 0.00]
+# 新增：负载识别与判定的配置
+    payload_management:
+      # 负载的物理属性 (用于 setPayloadState)
+      has_load: false
+      box_dim: 0.25
+      # 默认值：按 URDF 的 Link_5 局部坐标系，负载沿末端 +Z 方向延伸。
+      com_offset: [0.0, 0.0, 0.2219]
+      estimation_joint_index: 1.0
+      expected_mass: 0.5
+      identification_time: 0.2
+      load_threshold: 0.1
+      min_lever_arm: 0.05
+    # 预设动作点 (角度制)
+    presets:
+      load:     [0.0,  90.0, -80.0, -90.0, 0.0]   # 俯瞰姿态，相机朝正下方   之前第三个是-90(因为虚位)
+      look_out: [0.0, 90.0, -145.0, 0.0,  0.0]   # 瞭望姿态，相机朝斜下方
+      reset:    [0.0, 175.0, -170.0, 10.0, 0.0]   # 收回/待机
+      carry:    [0.0, 175.0, -140.0, 10.0, 0.0]   # 持箱收回姿态（带负载），角度同 reset，按需调整
+    # 机器人几何参数 (用于解析逆解)
+    robot_geometry:
+      l1: 0.0845
+      l2: 0.350005
+      l3: 0.243441
+      l4: 0.046
+    # 轨迹规划参数
+    trajectory_planner:
+      state_topic: /arm2/_lowState/joint
+      target_topic: /joint_target_state
+      ready_topic: /robot_driver/ready
+      action_name: move_joint
+      publish_rate_hz: 100.0
+      target_qos_depth: 10
+      min_segment_duration: 0.3
+      log_targets: false
+      dist_threshold: 0.05
+      max_acceleration: 1.0
+      max_velocity: 0.5
+    task:
+      require_payload_service: false
+      require_suction_service: false
+      remote_mode: false        # true = 通过 /arm/cmd topic 控制，false = 菜单交互模式
+
+    task_step6:
+      grasp_pitch:       -1.57    # 抓取末端俯仰角 (rad)
+      tool_pitch_offset:  0.25     # 实机 pitch 标定偏移 (rad)，正值=吸盘往前倾
+      tool_yaw_offset:    0.0   # 实机 yaw 标定偏移 (rad)，正值=逆时针(从上往下看)
+      object_height:      0.005    # 物体高度，决定末端 Z 落点 (m)
+      pre_grasp_offset:   0.10    # 预抓取悬停高度偏移 (m)
+      tool_offset_x:      0.0    # 工具坐标系偏移0.02 0.05
+      tool_offset_y:      0.0
+      tool_offset_z:      0.08   # 工具坐标系偏移（补偿 base_link Z=0.38m 偏置）  之前是-0.17
+      tool_tip_length:    0.0     # 吸盘接触面到 Link_5 origin 的距离 (m)，沿末端方向补偿
+      pick_object_name:  "box"    # 传给 get_pick_pos 服务的物体名
+      use_mock_target:    false   # true 时 case6 用固定坐标（调试用）
+      mock_x:             0.35
+      mock_y:             0.0
+      mock_z:             0.12
+
+    task_place:
+      pre_place_offset:   0.12    # 预放置悬停高度偏移 (m)
+      retreat_offset:     0.15    # 放置后垂直后退距离 (m)
+
+    task_place_frame:
+      hover_height:       0.10    # 预放置悬停高度 (m)，相对方框 z 坐标   ///会先到这个点再向下放，为了避免碰到狗
+      contact_offset:     0.45    # 最后接触点的补偿        ///   基本上在箱子边长附近
+      frame_name:         "target_frame"
+      roll_sign:          1.0
+      use_mock_target:    false
+      mock_x:             0.35
+      mock_y:             0.0
+      mock_z:             0.0
+      mock_yaw:           0.0
+
+    task_stack:
+      hover_height:       0.05    # 预叠放悬停高度 (m)，
+      contact_offset:     0.25   # 箱子边长 0.25m，使吸盘对准上表面   
+      stack_service:      "get_stack_pos"
+      roll_sign:          1.0
+      use_mock_target:    false
+      mock_x:             0.35
+      mock_y:             0.0
+      mock_z:             0.1
+      mock_yaw:           0.0
+
+    visual_align:
+      align_threshold:    0.005   # Phase-2 对齐收敛阈值：末端与目标 XY 误差 (m)
+      max_iters:          5       # Phase-2 最大迭代次数
+    teach_pendant:
+      topic: /joint_states
+      target_topic: /joint_target_state
+      mode_service: set_controller_mode
+      mode_name: teach_pendant
+      request_mode_on_startup: true
+      republish_hz: 50.0
+      max_abs_acceleration: 30.0
+      teacher_qos_depth: 10
+      target_qos_depth: 10
+      log_input: false
+      joint_names: [joint1, joint2, joint3, joint4, joint5]
+      # 1轴按 ±240° 软件限位保护线束；2轴按 [0, 3.5]，启动时由底层驱动一次性选圈。
+      angle_window_lower: [-4.1887902, 0.0, -3.0, -2.0, -3.14159265]
+      angle_window_upper: [4.1887902, 3.5, 0.15, 1.57, 3.14159265]
+    teach_drag_record:
+      output_file: recordings/teach_drag_trajectory.yaml
+      state_topic: /arm2/_lowState/joint
+      ready_topic: /robot_driver/ready
+      autosave_period_sec: 1.0
+      min_sample_period_sec: 0.05
+      min_joint_delta_norm: 0.01
+      require_ready: true
+      overwrite_output: true
+      joint_names: [joint1, joint2, joint3, joint4, joint5]
+    inverse_dynamics:
+      state_topic: /arm2/_lowState/joint
+      target_topic: /joint_target_state
+      command_topic: /arm2/_lowCmd/command
+      ready_topic: /robot_driver/ready
+      mode_service: set_controller_mode
+      payload_service: set_payload_state
+      control_rate_hz: 100.0
+      target_timeout_sec: 0.25
+      target_qos_depth: 10
+      hold_position_on_startup: true
+      default_mode: moving
+      log_input: false
+      # 与 dm_motor_sdk_ros 驱动内部限位保持一致。
+      angle_window_lower: [-4.1887902, 0.0, -3.0, -2.0, -3.14159265]
+      angle_window_upper: [4.1887902, 3.5, 0.15, 1.57, 3.14159265]
+      command_velocity_limits: [2.0, 1.5, 2.0, 2.0, 3.0]
+      command_torque_limits: [8.0, 20.0, 8.0, 8.0, 4.0]
+    gravity_comp_test:
+      enable_payload_service: false
+      payload_service: set_payload_state
+      gains_mode: gravity_comp
+    inverse_dynamics_test:
+      target_topic: /joint_target_state
+      state_topic: /arm2/_lowState/joint
+      ready_topic: /robot_driver/ready
+      target_qos_depth: 10
+      publish_rate_hz: 150.0
+      motion_frequency_hz: 0.12
+      safety_margin_rad: 0.08
+      motion_range_ratio: 0.12
+      max_abs_offset_rad: 0.35
+      phase_offsets: [0.0, 0.5, 1.0, 1.4, 1.8]
+      active_joint_order: [1, 2, 3, 4, 5]
+      lower_limits: [-4.1887902, 0.0, -3.0, -2.0, -3.1415]
+      upper_limits: [4.1887902, 3.5, 0.15, 1.57, 3.1415]
+    control:
+      command_topic: /arm2/_lowCmd/command
+      payload_service: set_payload_state
+    urdf_path: urdf/arm2.urdf
