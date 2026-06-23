@@ -11,8 +11,6 @@ PARAMS_FILE="$DEFAULT_PARAMS_FILE"
 DRIVER_PARAMS_FILE="$DEFAULT_DRIVER_PARAMS_FILE"
 READY_TIMEOUT=10
 SERVICE_TIMEOUT=10
-PAYLOAD_MASS=0.5
-PAYLOAD_COM="0.0,0.0,0.2219"
 PAYLOAD_SERVICE_PARAM="set_payload_state"
 PAYLOAD_SERVICE_CALL="/set_payload_state"
 
@@ -38,8 +36,6 @@ Options:
   --driver-params <file>    dm_motor_sdk_ros driver parameter file
   --ready-timeout <sec>     wait timeout for /robot_driver/ready (default: ${READY_TIMEOUT})
   --service-timeout <sec>   wait timeout for payload service (default: ${SERVICE_TIMEOUT})
-  --mass <kg>               payload mass in kg (default: ${PAYLOAD_MASS})
-  --com <x,y,z>             payload COM in meters (default: ${PAYLOAD_COM})
   --payload-service <name>  payload service name (default: ${PAYLOAD_SERVICE_PARAM})
   -h, --help                show this help
 
@@ -191,14 +187,10 @@ wait_for_service_available() {
 
 call_payload_service() {
     local service_name="$1"
-    local mass="$2"
-    local com_x="$3"
-    local com_y="$4"
-    local com_z="$5"
 
     local output=""
     if ! output=$(ros2 service call "${service_name}" robot_msgs/srv/SetPayloadState \
-        "{has_load: true, mass: ${mass}, com: [${com_x}, ${com_y}, ${com_z}]}" 2>&1); then
+        "{has_load: true}" 2>&1); then
         echo "[ERROR] Failed to call ${service_name}" >&2
         echo "${output}" >&2
         return 1
@@ -237,14 +229,6 @@ while [[ $# -gt 0 ]]; do
             ;;
         --service-timeout)
             SERVICE_TIMEOUT="$2"
-            shift 2
-            ;;
-        --mass)
-            PAYLOAD_MASS="$2"
-            shift 2
-            ;;
-        --com)
-            PAYLOAD_COM="$2"
             shift 2
             ;;
         --payload-service)
@@ -289,12 +273,6 @@ if [[ ! -f "${DRIVER_PARAMS_FILE}" ]]; then
     exit 1
 fi
 
-IFS=',' read -r PAYLOAD_COM_X PAYLOAD_COM_Y PAYLOAD_COM_Z <<< "${PAYLOAD_COM}"
-if [[ -z "${PAYLOAD_COM_X:-}" || -z "${PAYLOAD_COM_Y:-}" || -z "${PAYLOAD_COM_Z:-}" ]]; then
-    echo "[ERROR] Invalid --com format. Expected x,y,z but got: ${PAYLOAD_COM}" >&2
-    exit 1
-fi
-
 PAYLOAD_SERVICE_CALL="$(normalize_ros_name "${PAYLOAD_SERVICE_PARAM}")"
 
 trap cleanup EXIT INT TERM
@@ -308,8 +286,7 @@ record_existing_ros2_daemons
 echo "[INFO] arm2_task params: ${PARAMS_FILE}"
 echo "[INFO] driver params: ${DRIVER_PARAMS_FILE}"
 echo "[INFO] payload service: ${PAYLOAD_SERVICE_CALL}"
-echo "[INFO] payload mass: ${PAYLOAD_MASS} kg"
-echo "[INFO] payload COM: [${PAYLOAD_COM_X}, ${PAYLOAD_COM_Y}, ${PAYLOAD_COM_Z}]"
+echo "[INFO] payload parameters are loaded from ${PARAMS_FILE}"
 
 echo "[INFO] Launching dm_motor_sdk_ros driver..."
 launch_in_group DRIVER_PID ros2 launch dm_motor_sdk_ros dm_motor_robot_driver.launch.py params_path:="${DRIVER_PARAMS_FILE}"
@@ -336,7 +313,7 @@ if ! wait_for_service_available "${PAYLOAD_SERVICE_CALL}" "${SERVICE_TIMEOUT}"; 
 fi
 
 echo "[INFO] Enabling payload model..."
-if ! call_payload_service "${PAYLOAD_SERVICE_CALL}" "${PAYLOAD_MASS}" "${PAYLOAD_COM_X}" "${PAYLOAD_COM_Y}" "${PAYLOAD_COM_Z}"; then
+if ! call_payload_service "${PAYLOAD_SERVICE_CALL}"; then
     exit 1
 fi
 

@@ -54,6 +54,12 @@ public:
             this->declare_parameter("inverse_dynamics.mode_service", "set_controller_mode");
         payload_service_name_ =
             this->declare_parameter("inverse_dynamics.payload_service", "set_payload_state");
+        payload_has_load_ = this->declare_parameter("payload_management.has_load", false);
+        payload_mass_ = this->declare_parameter("payload_management.expected_mass", 0.5);
+        payload_box_dim_ = this->declare_parameter("payload_management.box_dim", 0.25);
+        auto payload_com = this->declare_parameter(
+            "payload_management.com_offset",
+            std::vector<double>{0.0, 0.0, 0.2219});
         control_rate_hz_ = this->declare_parameter("inverse_dynamics.control_rate_hz", 100.0);
         hold_position_on_startup_ =
             this->declare_parameter("inverse_dynamics.hold_position_on_startup", true);
@@ -104,6 +110,31 @@ public:
             command_velocity_limits_, 1.0, "inverse_dynamics.command_velocity_limits");
         normalize_positive_limits(
             command_torque_limits_, 1.0, "inverse_dynamics.command_torque_limits");
+        if (!std::isfinite(payload_mass_) || payload_mass_ < 0.0) {
+            RCLCPP_WARN(
+                this->get_logger(),
+                "payload_management.expected_mass=%.4f is invalid. Falling back to 0.5 kg.",
+                payload_mass_);
+            payload_mass_ = 0.5;
+        }
+        if (!std::isfinite(payload_box_dim_) || payload_box_dim_ <= 0.0) {
+            RCLCPP_WARN(
+                this->get_logger(),
+                "payload_management.box_dim=%.4f is invalid. Falling back to 0.25 m.",
+                payload_box_dim_);
+            payload_box_dim_ = 0.25;
+        }
+        if (payload_com.size() != static_cast<size_t>(3) ||
+            !std::isfinite(payload_com[0]) ||
+            !std::isfinite(payload_com[1]) ||
+            !std::isfinite(payload_com[2]))
+        {
+            RCLCPP_WARN(
+                this->get_logger(),
+                "payload_management.com_offset is invalid. Falling back to [0.0, 0.0, 0.2219].");
+            payload_com = {0.0, 0.0, 0.2219};
+        }
+        payload_com_ = Eigen::Vector3d(payload_com[0], payload_com[1], payload_com[2]);
 
         if (control_rate_hz_ < 1.0) {
             RCLCPP_WARN(
@@ -132,6 +163,8 @@ public:
             arm2_task::RobotGeometry(l1, l2, l3, l4));
         dyn_manager_ = std::make_unique<arm2_task::DynamicsManager>(urdf);
         dyn_manager_->initParams(fc, fv, ratios, alpha);
+        dyn_manager_->setPayloadBoxDim(payload_box_dim_);
+        dyn_manager_->setPayloadState(payload_has_load_, payload_mass_, payload_com_);
         tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
         static_tf_broadcaster_ =
             std::make_unique<tf2_ros::StaticTransformBroadcaster>(*this);
@@ -213,6 +246,15 @@ public:
             target_timeout_sec_,
             target_qos_depth_,
             hold_position_on_startup_ ? "true" : "false");
+        RCLCPP_INFO(
+            this->get_logger(),
+            "Inverse dynamics payload parameters: has_load=%s mass=%.4f box_dim=%.4f com=[%.4f, %.4f, %.4f]",
+            payload_has_load_ ? "true" : "false",
+            payload_mass_,
+            payload_box_dim_,
+            payload_com_[0],
+            payload_com_[1],
+            payload_com_[2]);
     }
 
 private:
@@ -574,30 +616,19 @@ private:
         const std::shared_ptr<robot_msgs::srv::SetPayloadState::Request> request,
         std::shared_ptr<robot_msgs::srv::SetPayloadState::Response> response)
     {
-        if (!std::isfinite(request->mass) || request->mass < 0.0) {
-            response->success = false;
-            response->message = "Invalid payload mass.";
-            return;
-        }
-
-        Eigen::Vector3d com(request->com[0], request->com[1], request->com[2]);
-        if (!std::isfinite(com[0]) || !std::isfinite(com[1]) || !std::isfinite(com[2])) {
-            response->success = false;
-            response->message = "Invalid payload COM.";
-            return;
-        }
-
-        dyn_manager_->setPayloadState(request->has_load, request->mass, com);
+        dyn_manager_->setPayloadState(request->has_load, payload_mass_, payload_com_);
+        payload_has_load_ = request->has_load;
         response->success = true;
         response->message = request->has_load ? "Payload model enabled." : "Payload model cleared.";
         RCLCPP_INFO(
             this->get_logger(),
-            "Payload state updated: has_load=%s mass=%.4f com=[%.4f, %.4f, %.4f]",
+            "Payload state updated from parameters: has_load=%s mass=%.4f com=[%.4f, %.4f, %.4f] box_dim=%.4f",
             request->has_load ? "true" : "false",
-            request->mass,
-            com[0],
-            com[1],
-            com[2]);
+            payload_mass_,
+            payload_com_[0],
+            payload_com_[1],
+            payload_com_[2],
+            payload_box_dim_);
     }
 
     bool is_teach_drag_mode(const std::string & mode_name) const
@@ -810,6 +841,10 @@ private:
     std::string default_mode_;
     double control_rate_hz_{100.0};
     double target_timeout_sec_{0.25};
+    bool payload_has_load_{false};
+    double payload_mass_{0.5};
+    double payload_box_dim_{0.25};
+    Eigen::Vector3d payload_com_{0.0, 0.0, 0.2219};
     int target_qos_depth_{10};
     bool hold_position_on_startup_{true};
     std::vector<double> angle_window_lower_;

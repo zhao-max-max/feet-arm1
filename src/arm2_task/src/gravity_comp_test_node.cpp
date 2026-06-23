@@ -40,9 +40,42 @@ public:
             this->declare_parameter("gravity_comp_test.enable_payload_service", false);
         payload_service_name_ =
             this->declare_parameter("gravity_comp_test.payload_service", "set_payload_state");
+        payload_has_load_ = this->declare_parameter("payload_management.has_load", false);
+        payload_mass_ = this->declare_parameter("payload_management.expected_mass", 0.5);
+        payload_box_dim_ = this->declare_parameter("payload_management.box_dim", 0.25);
+        auto payload_com = this->declare_parameter(
+            "payload_management.com_offset",
+            std::vector<double>{0.0, 0.0, 0.2219});
+        if (!std::isfinite(payload_mass_) || payload_mass_ < 0.0) {
+            RCLCPP_WARN(
+                this->get_logger(),
+                "payload_management.expected_mass=%.4f is invalid. Falling back to 0.5 kg.",
+                payload_mass_);
+            payload_mass_ = 0.5;
+        }
+        if (!std::isfinite(payload_box_dim_) || payload_box_dim_ <= 0.0) {
+            RCLCPP_WARN(
+                this->get_logger(),
+                "payload_management.box_dim=%.4f is invalid. Falling back to 0.25 m.",
+                payload_box_dim_);
+            payload_box_dim_ = 0.25;
+        }
+        if (payload_com.size() != 3U ||
+            !std::isfinite(payload_com[0]) ||
+            !std::isfinite(payload_com[1]) ||
+            !std::isfinite(payload_com[2]))
+        {
+            RCLCPP_WARN(
+                this->get_logger(),
+                "payload_management.com_offset is invalid. Falling back to [0.0, 0.0, 0.2219].");
+            payload_com = {0.0, 0.0, 0.2219};
+        }
+        payload_com_ = Eigen::Vector3d(payload_com[0], payload_com[1], payload_com[2]);
 
         dyn_manager_ = std::make_unique<arm2_task::DynamicsManager>(urdf);
         dyn_manager_->initParams(fc, fv, ratios, alpha);
+        dyn_manager_->setPayloadBoxDim(payload_box_dim_);
+        dyn_manager_->setPayloadState(payload_has_load_, payload_mass_, payload_com_);
 
         current_q_ = Eigen::VectorXd::Zero(5);
         current_dq_ = Eigen::VectorXd::Zero(5);
@@ -111,6 +144,15 @@ public:
             "Gravity compensation payload service: %s%s",
             enable_payload_service_ ? "enabled on " : "disabled",
             enable_payload_service_ ? payload_service_name_.c_str() : "");
+        RCLCPP_INFO(
+            this->get_logger(),
+            "Gravity compensation payload parameters: has_load=%s mass=%.4f box_dim=%.4f com=[%.4f, %.4f, %.4f]",
+            payload_has_load_ ? "true" : "false",
+            payload_mass_,
+            payload_box_dim_,
+            payload_com_[0],
+            payload_com_[1],
+            payload_com_[2]);
     }
 
 private:
@@ -295,30 +337,19 @@ private:
         const std::shared_ptr<robot_msgs::srv::SetPayloadState::Request> request,
         std::shared_ptr<robot_msgs::srv::SetPayloadState::Response> response)
     {
-        if (!std::isfinite(request->mass) || request->mass < 0.0) {
-            response->success = false;
-            response->message = "Invalid payload mass.";
-            return;
-        }
-
-        Eigen::Vector3d com(request->com[0], request->com[1], request->com[2]);
-        if (!std::isfinite(com[0]) || !std::isfinite(com[1]) || !std::isfinite(com[2])) {
-            response->success = false;
-            response->message = "Invalid payload COM.";
-            return;
-        }
-
-        dyn_manager_->setPayloadState(request->has_load, request->mass, com);
+        dyn_manager_->setPayloadState(request->has_load, payload_mass_, payload_com_);
+        payload_has_load_ = request->has_load;
         response->success = true;
         response->message = request->has_load ? "Payload model enabled." : "Payload model cleared.";
         RCLCPP_INFO(
             this->get_logger(),
-            "Gravity compensation payload updated: has_load=%s mass=%.4f com=[%.4f, %.4f, %.4f]",
+            "Gravity compensation payload updated from parameters: has_load=%s mass=%.4f com=[%.4f, %.4f, %.4f] box_dim=%.4f",
             request->has_load ? "true" : "false",
-            request->mass,
-            com[0],
-            com[1],
-            com[2]);
+            payload_mass_,
+            payload_com_[0],
+            payload_com_[1],
+            payload_com_[2],
+            payload_box_dim_);
     }
 
     void debug_summary()
@@ -372,10 +403,14 @@ private:
     bool driver_ready_{false};
     bool has_data_{false};
     bool enable_payload_service_{false};
+    bool payload_has_load_{false};
     std::string gains_mode_;
     std::string payload_service_name_;
+    double payload_mass_{0.5};
+    double payload_box_dim_{0.25};
     std::vector<double> kp_;
     std::vector<double> kd_;
+    Eigen::Vector3d payload_com_{0.0, 0.0, 0.2219};
     Eigen::VectorXd current_q_;
     Eigen::VectorXd current_dq_;
     Eigen::VectorXd current_tau_est_;

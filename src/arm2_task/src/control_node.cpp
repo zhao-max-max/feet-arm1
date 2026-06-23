@@ -659,39 +659,23 @@ void ControlNode::handle_payload_estimate(const std::shared_ptr<robot_msgs::srv:
 void ControlNode::handle_payload_state(const std::shared_ptr<robot_msgs::srv::SetPayloadState::Request> request,
                                        std::shared_ptr<robot_msgs::srv::SetPayloadState::Response> response)
 {
-    if (!std::isfinite(request->mass) || request->mass < 0.0)
-    {
-        response->success = false;
-        response->message = "Invalid payload mass.";
-        return;
-    }
-
-    Eigen::Vector3d com(request->com[0], request->com[1], request->com[2]);
-    if (!std::isfinite(com[0]) || !std::isfinite(com[1]) || !std::isfinite(com[2]))
-    {
-        response->success = false;
-        response->message = "Invalid payload COM.";
-        return;
-    }
-
     {
         std::lock_guard<std::mutex> dynamics_lock(dynamics_mutex_);
-        dyn_manager_->setPayloadState(request->has_load, request->mass, com);
+        dyn_manager_->setPayloadState(request->has_load, payload_mass_, payload_com_);
         payload_has_load_ = request->has_load;
-        payload_mass_ = request->mass;
-        payload_com_ = com;
     }
 
     response->success = true;
     response->message = request->has_load ? "Payload model enabled." : "Payload model cleared.";
     RCLCPP_INFO(
         this->get_logger(),
-        "Control payload updated: has_load=%s mass=%.4f com=[%.4f, %.4f, %.4f]",
+        "Control payload updated from parameters: has_load=%s mass=%.4f com=[%.4f, %.4f, %.4f] box_dim=%.4f",
         request->has_load ? "true" : "false",
-        request->mass,
-        com[0],
-        com[1],
-        com[2]);
+        payload_mass_,
+        payload_com_[0],
+        payload_com_[1],
+        payload_com_[2],
+        payload_box_dim_);
 }
 
 void ControlNode::publish_static_camera_tf()

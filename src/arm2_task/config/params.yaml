@@ -61,7 +61,7 @@
         kp: [0.00, 0.25, 0.15, 0.08, 0.00]
 # 新增：负载识别与判定的配置
     payload_management:
-      # 负载的物理属性 (用于 setPayloadState)
+      # 负载的物理属性，由节点在启动时加载；SetPayloadState 仅切换 has_load 开关。
       has_load: false
       box_dim: 0.25
       # 默认值：按 URDF 的 Link_5 局部坐标系，负载沿末端 +Z 方向延伸。
