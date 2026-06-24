@@ -69,45 +69,6 @@ ament_target_dependencies(gravity_comp_test_node
   ament_index_cpp
 )
 
-add_executable(inverse_dynamics_node src/inverse_dynamics_node.cpp)
-target_link_libraries(inverse_dynamics_node arm2_algorithms)
-ament_target_dependencies(inverse_dynamics_node
-  rclcpp
-  geometry_msgs
-  pinocchio
-  robot_msgs
-  std_msgs
-  tf2
-  tf2_ros
-  tf2_geometry_msgs
-  ament_index_cpp
-)
-
-add_executable(trajectory_planner_node src/trajectory_planner_node.cpp)
-ament_target_dependencies(trajectory_planner_node
-  rclcpp
-  robot_msgs
-  std_msgs
-  rclcpp_action
-)
-
-add_executable(inverse_dynamics_target_test_node src/inverse_dynamics_target_test_node.cpp)
-ament_target_dependencies(inverse_dynamics_target_test_node
-  rclcpp
-  pinocchio
-  robot_msgs
-  std_msgs
-)
-
-add_executable(teach_pendant_follow_node src/teach_pendant_follow_node.cpp)
-ament_target_dependencies(teach_pendant_follow_node
-  rclcpp
-  pinocchio
-  sensor_msgs
-  robot_msgs
-  std_msgs
-)
-
 add_executable(debug_node src/debug_node.cpp)
 ament_target_dependencies(debug_node
   rclcpp
@@ -129,10 +90,6 @@ install(TARGETS
   control_node
   task_node
   gravity_comp_test_node
-  inverse_dynamics_node
-  trajectory_planner_node
-  inverse_dynamics_target_test_node
-  teach_pendant_follow_node
   debug_node
   DESTINATION lib/${PROJECT_NAME}
 )
