@@ -1,5 +1,4 @@
 #include <chrono>
-#include <cmath>
 #include <memory>
 #include <string>
 #include <Eigen/Dense>
@@ -64,48 +63,12 @@ public:
 
         max_velocity_limit_ = this->declare_parameter("max_joint_velocity", 1.2);
         max_acceleration_limit_ = this->declare_parameter("max_acceleration_limit", 1.0);
-        payload_service_name_ =
-            this->declare_parameter("control.payload_service", std::string("set_payload_state"));
-        payload_has_load_ = this->declare_parameter("payload_management.has_load", false);
-        payload_mass_ = this->declare_parameter("payload_management.expected_mass", 0.5);
-        payload_box_dim_ = this->declare_parameter("payload_management.box_dim", 0.25);
-        auto payload_com = this->declare_parameter(
-            "payload_management.com_offset",
-            std::vector<double>{0.0, 0.0, 0.2219});
 
         // 在 ControlNode 构造函数中添加：
         auto fc = this->declare_parameter("dynamics.friction.fc", std::vector<double>(5, 0.0));
         auto fv = this->declare_parameter("dynamics.friction.fv", std::vector<double>(5, 0.0));
         auto ratios = this->declare_parameter("dynamics.friction.GearRatio", std::vector<double>(5, 1.0));
         auto alpha = this->declare_parameter("dynamics.friction.alpha", 100.0);
-
-        if (!std::isfinite(payload_mass_) || payload_mass_ < 0.0)
-        {
-            RCLCPP_WARN(
-                this->get_logger(),
-                "payload_management.expected_mass=%.4f is invalid. Falling back to 0.5 kg.",
-                payload_mass_);
-            payload_mass_ = 0.5;
-        }
-        if (!std::isfinite(payload_box_dim_) || payload_box_dim_ <= 0.0)
-        {
-            RCLCPP_WARN(
-                this->get_logger(),
-                "payload_management.box_dim=%.4f is invalid. Falling back to 0.25 m.",
-                payload_box_dim_);
-            payload_box_dim_ = 0.25;
-        }
-        if (payload_com.size() != 3U ||
-            !std::isfinite(payload_com[0]) ||
-            !std::isfinite(payload_com[1]) ||
-            !std::isfinite(payload_com[2]))
-        {
-            RCLCPP_WARN(
-                this->get_logger(),
-                "payload_management.com_offset is invalid. Falling back to [0.0, 0.0, 0.2219].");
-            payload_com = {0.0, 0.0, 0.2219};
-        }
-        payload_com_ = Eigen::Vector3d(payload_com[0], payload_com[1], payload_com[2]);
 
         // 2. 初始化核心组件
         kin_engine_ = std::make_unique<arm2_task::KinematicsEngine>(urdf, arm2_task::RobotGeometry(l1, l2, l3, l4));
@@ -147,8 +110,10 @@ public:
         payload_service_ = this->create_service<robot_msgs::srv::GetPayloadEstimate>(
             "get_payload_estimate",
             std::bind(&ControlNode::handle_payload_estimate, this, std::placeholders::_1, std::placeholders::_2));
+        payload_state_service_name_ =
+            this->declare_parameter("inverse_dynamics.payload_service", std::string("set_payload_state"));
         payload_state_service_ = this->create_service<robot_msgs::srv::SetPayloadState>(
-            payload_service_name_,
+            payload_state_service_name_,
             std::bind(&ControlNode::handle_payload_state, this, std::placeholders::_1, std::placeholders::_2));
 
         action_server_ = rclcpp_action::create_server<MoveJoint>(
@@ -162,25 +127,10 @@ public:
 
         control_timer_ = this->create_wall_timer(10ms, std::bind(&ControlNode::control_loop, this));
 
-        {
-            std::lock_guard<std::mutex> dynamics_lock(dynamics_mutex_);
-            dyn_manager_->initParams(fc, fv, ratios, alpha);
-            dyn_manager_->setPayloadBoxDim(payload_box_dim_);
-            dyn_manager_->setPayloadState(payload_has_load_, payload_mass_, payload_com_);
-        }
+        dyn_manager_->initParams(fc, fv, ratios, alpha);
         load_all_gains();
         publish_static_camera_tf();
         publish_static_dog_camera_tf();
-        RCLCPP_INFO(
-            this->get_logger(),
-            "Control payload model: service=%s has_load=%s mass=%.4f box_dim=%.4f com=[%.4f, %.4f, %.4f]",
-            payload_service_name_.c_str(),
-            payload_has_load_ ? "true" : "false",
-            payload_mass_,
-            payload_box_dim_,
-            payload_com_[0],
-            payload_com_[1],
-            payload_com_[2]);
         RCLCPP_INFO(this->get_logger(), "Control Node Initialized.");
     }
 
@@ -200,7 +150,6 @@ private:
     bool driver_ready_{false};
     bool system_ready_logged_{false};
     std::mutex data_mutex_;
-    std::mutex dynamics_mutex_;
 
     Eigen::VectorXd current_q_, current_dq_, current_tau_;
     Eigen::VectorXd command_q_, command_v_, command_a_;
@@ -211,11 +160,6 @@ private:
 
     double current_max_v_, current_max_a_, current_R_;
     double max_velocity_limit_, max_acceleration_limit_;
-    bool payload_has_load_{false};
-    double payload_mass_{0.5};
-    double payload_box_dim_{0.25};
-    Eigen::Vector3d payload_com_{0.0, 0.0, 0.2219};
-    std::string payload_service_name_;
 
     PDGains current_gains_;
     std::map<std::string, PDGains> gains_map_;
@@ -234,6 +178,7 @@ private:
     rclcpp_action::Server<MoveJoint>::SharedPtr action_server_;
     rclcpp::TimerBase::SharedPtr control_timer_;
     rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr friction_pub_;
+    std::string payload_state_service_name_;
 
     // --- 内部函数原型 ---
     void load_all_gains();
@@ -518,13 +463,8 @@ void ControlNode::control_loop()
     des_state.ddq = a_final;
 
     // 获取当前位姿下的重力/摩擦力前馈
-    Eigen::VectorXd tau_f(5);
-    Eigen::VectorXd tau_ff(5);
-    {
-        std::lock_guard<std::mutex> dynamics_lock(dynamics_mutex_);
-        tau_f = dyn_manager_->computeFriction(des_state.dq);
-        tau_ff = dyn_manager_->getFeedForwardTorque(des_state);
-    }
+    Eigen::VectorXd tau_f = dyn_manager_->computeFriction(des_state.dq);
+    Eigen::VectorXd tau_ff = dyn_manager_->getFeedForwardTorque(des_state);
 
     // --- 【新增】发布摩擦力话题 ---
     std_msgs::msg::Float32MultiArray friction_msg;
@@ -644,11 +584,7 @@ void ControlNode::handle_payload_estimate(const std::shared_ptr<robot_msgs::srv:
     }
 
     // 调用 DynamicsManager 内部算法
-    double m_est = 0.0;
-    {
-        std::lock_guard<std::mutex> dynamics_lock(dynamics_mutex_);
-        m_est = dyn_manager_->estimatePayloadMass(actual_state);
-    }
+    double m_est = dyn_manager_->estimatePayloadMass(actual_state);
 
     response->mass = static_cast<float>(m_est);
     response->success = true;
@@ -659,23 +595,33 @@ void ControlNode::handle_payload_estimate(const std::shared_ptr<robot_msgs::srv:
 void ControlNode::handle_payload_state(const std::shared_ptr<robot_msgs::srv::SetPayloadState::Request> request,
                                        std::shared_ptr<robot_msgs::srv::SetPayloadState::Response> response)
 {
+    if (!std::isfinite(request->mass) || request->mass < 0.0)
     {
-        std::lock_guard<std::mutex> dynamics_lock(dynamics_mutex_);
-        dyn_manager_->setPayloadState(request->has_load, payload_mass_, payload_com_);
-        payload_has_load_ = request->has_load;
+        response->success = false;
+        response->message = "Invalid payload mass.";
+        return;
     }
 
+    const Eigen::Vector3d com(request->com[0], request->com[1], request->com[2]);
+    if (!std::isfinite(com[0]) || !std::isfinite(com[1]) || !std::isfinite(com[2]))
+    {
+        response->success = false;
+        response->message = "Invalid payload COM.";
+        return;
+    }
+
+    dyn_manager_->setPayloadState(request->has_load, request->mass, com);
     response->success = true;
     response->message = request->has_load ? "Payload model enabled." : "Payload model cleared.";
+
     RCLCPP_INFO(
         this->get_logger(),
-        "Control payload updated from parameters: has_load=%s mass=%.4f com=[%.4f, %.4f, %.4f] box_dim=%.4f",
+        "Payload model updated: has_load=%s mass=%.4f com=[%.4f, %.4f, %.4f]",
         request->has_load ? "true" : "false",
-        payload_mass_,
-        payload_com_[0],
-        payload_com_[1],
-        payload_com_[2],
-        payload_box_dim_);
+        request->mass,
+        com[0],
+        com[1],
+        com[2]);
 }
 
 void ControlNode::publish_static_camera_tf()

@@ -11,8 +11,9 @@ find_package(tf2_geometry_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(pinocchio REQUIRED)
-find_package(robot_msgs REQUIRED) 
+find_package(robot_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(std_srvs REQUIRED)
 find_package(ament_index_cpp REQUIRED)
 
 # 2. 包含头文件
@@ -47,26 +48,17 @@ ament_target_dependencies(control_node
 # 编译任务管理节点
 add_executable(task_node src/task_node.cpp)
 target_link_libraries(task_node arm2_algorithms)
-ament_target_dependencies(task_node 
-  rclcpp 
-  geometry_msgs 
-  pinocchio 
+ament_target_dependencies(task_node
+  rclcpp
+  geometry_msgs
+  pinocchio
   robot_msgs
   std_msgs
+  std_srvs
   tf2
   tf2_ros
   tf2_geometry_msgs
   rclcpp_action
-)
-
-add_executable(gravity_comp_test_node src/gravity_comp_test_node.cpp)
-target_link_libraries(gravity_comp_test_node arm2_algorithms)
-ament_target_dependencies(gravity_comp_test_node
-  rclcpp
-  pinocchio
-  robot_msgs
-  std_msgs
-  ament_index_cpp
 )
 
 add_executable(debug_node src/debug_node.cpp)
@@ -89,13 +81,12 @@ install(TARGETS arm2_algorithms
 install(TARGETS
   control_node
   task_node
-  gravity_comp_test_node
   debug_node
   DESTINATION lib/${PROJECT_NAME}
 )
 
-# 安装配置与启动文件
-install(DIRECTORY config launch urdf meshes
+# 安装配置与模型文件
+install(DIRECTORY config urdf meshes
   DESTINATION share/${PROJECT_NAME}
 )
 

@@ -24,7 +24,6 @@ public:
      * @brief 动态设置负载状态（500g正方体）
      */
     void setPayloadState(bool has_load, double mass = 0.5, const Eigen::Vector3d& com = Eigen::Vector3d(0, 0, 0.2219));
-    void setPayloadBoxDim(double box_dim);
 
     /**
      * @brief 抓取后静态检测：根据力矩残差估计负载质量
@@ -48,7 +47,6 @@ private:
     pinocchio::FrameIndex last_link_body_frame_idx_; // 末端连杆对应的 BODY frame 索引
     pinocchio::JointIndex payload_joint_idx_;        // 承载末端负载惯量的父关节索引
     pinocchio::Inertia original_inertia_;            // 缓存原始 URDF 惯量
-    double payload_box_dim_{0.25};                  // 负载等效立方体边长
 };
 
 } // namespace arm2_task

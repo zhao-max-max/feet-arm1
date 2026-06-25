@@ -3,7 +3,6 @@
 #include <pinocchio/algorithm/kinematics.hpp>
 #include <pinocchio/algorithm/frames.hpp>
 #include <pinocchio/parsers/urdf.hpp>
-#include <cmath>
 #include <iostream>
 #include <stdexcept>
 
@@ -43,8 +42,8 @@ void DynamicsManager::initParams(const std::vector<double>& fc,
 
 void DynamicsManager::setPayloadState(bool has_load, double mass, const Eigen::Vector3d& com) {
     if (has_load) {
-        // 计算正方体转动惯量: I = 1/6 * m * a^2
-        double i_val = (1.0/6.0) * mass * std::pow(payload_box_dim_, 2);
+        // 计算正方体转动惯量: I = 1/6 * m * a^2 (a=0.25m)
+        double i_val = (1.0/6.0) * mass * std::pow(0.25, 2);
         Eigen::Matrix3d inertia_mat = Eigen::Matrix3d::Identity() * i_val;
         
         pinocchio::Inertia load_inertia(mass, com, inertia_mat);
@@ -53,13 +52,6 @@ void DynamicsManager::setPayloadState(bool has_load, double mass, const Eigen::V
     } else {
         model_.inertias[payload_joint_idx_] = original_inertia_;
     }
-}
-
-void DynamicsManager::setPayloadBoxDim(double box_dim) {
-    if (!std::isfinite(box_dim) || box_dim <= 0.0) {
-        throw std::invalid_argument("Payload box dimension must be finite and positive.");
-    }
-    payload_box_dim_ = box_dim;
 }
 
 double DynamicsManager::estimatePayloadMass(const JointState& actual_state) {
