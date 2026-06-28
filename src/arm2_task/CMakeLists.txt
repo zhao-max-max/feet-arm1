@@ -12,6 +12,7 @@ find_package(geometry_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(pinocchio REQUIRED)
 find_package(robot_msgs REQUIRED)
+find_package(navigation REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
 find_package(ament_index_cpp REQUIRED)
@@ -53,6 +54,7 @@ ament_target_dependencies(task_node
   geometry_msgs
   pinocchio
   robot_msgs
+  navigation
   std_msgs
   std_srvs
   tf2

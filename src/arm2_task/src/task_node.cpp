@@ -36,7 +36,7 @@
 #include "std_msgs/msg/bool.hpp"
 #include "std_msgs/msg/string.hpp"
 #include "std_srvs/srv/trigger.hpp"
-#include "robot_msgs/srv/string_command.hpp"
+#include "navigation/srv/string_command.hpp"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
 #include "tf2_ros/buffer.h"
 #include "tf2_ros/transform_listener.h"
@@ -197,7 +197,7 @@ public:
         });
 
     // 客户端：向 nav 回报机械臂事件（grabbed / completed）
-    nav_event_client_ = this->create_client<robot_msgs::srv::StringCommand>(
+    nav_event_client_ = this->create_client<navigation::srv::StringCommand>(
         "/navigation/arm_event");
 
     RCLCPP_INFO(this->get_logger(),
@@ -1187,10 +1187,10 @@ private:
     }
   }
 
-  /** 复位：关吸盘 → moving → reset → idle */
+  /** 复位：关吸盘 → moving → reset → moving */
   void do_reset()
   {
-    RCLCPP_INFO(this->get_logger(), "[reset] suction OFF -> moving -> reset -> idle");
+    RCLCPP_INFO(this->get_logger(), "[reset] suction OFF -> moving -> reset -> moving");
     set_suction(false);
     if (!request_mode_switch("moving"))
     {
@@ -1205,7 +1205,7 @@ private:
     {
       wait_for_action_completion();
     }
-    request_mode_switch("idle");
+    request_mode_switch("moving");
   }
 
   /** 带吸盘复位（不关吸盘）：moving → reset → idle */
@@ -1442,7 +1442,7 @@ private:
     target_pub_->publish(target);
     request_mode_switch("moving");
     do_look_out(target);
-    wait_joints_still(0.02, 800);
+    wait_joints_still(0.02, 400);
 
     if (!do_grasp_move(target))
     {
@@ -1462,7 +1462,7 @@ private:
     target_pub_->publish(target);
     request_mode_switch("moving");
     do_look_out(target);
-    wait_joints_still(0.02, 800);
+    wait_joints_still(0.02, 400);
 
     // 多次感知取中位数：消除视觉返回不同等效边导致的 roll 跳变
     constexpr int N = 3;
@@ -1567,7 +1567,7 @@ private:
     fwd.position.z = 0.0;
     fwd.orientation.w = 1.0;
     do_look_out(fwd);
-    wait_joints_still(0.02, 800);
+    wait_joints_still(0.02, 400);
 
     RCLCPP_INFO(get_logger(), "[Phase1] At look_out. Select input mode:");
     std::cout << "\n[Phase1/Scan] Sensor input: (r)eal sensor / (m)anual input / (a)bort: ";
@@ -1635,7 +1635,7 @@ private:
     {
       return false;
     }
-    wait_joints_still(0.02, 800);
+    wait_joints_still(0.02, 400);
 
     // 记录进入 Phase 2 时的末端 Z（全程固定，只调 XY）
     double fixed_z;
@@ -1888,7 +1888,7 @@ private:
                   "[nav] /navigation/arm_event service unavailable, dropping event: %s", event.c_str());
       return;
     }
-    auto req = std::make_shared<robot_msgs::srv::StringCommand::Request>();
+    auto req = std::make_shared<navigation::srv::StringCommand::Request>();
     req->message = event;
     auto future = nav_event_client_->async_send_request(req);
     if (future.wait_for(std::chrono::seconds(2)) != std::future_status::ready)
@@ -1920,7 +1920,7 @@ private:
     fwd.orientation.w = 1.0;
     request_mode_switch("moving");
     do_look_out(fwd);
-    wait_joints_still(0.02, 800);
+    wait_joints_still(0.02, 400);
 
     if (!call_pick_service_sync(step6_pick_object_name_, &target))
     {
@@ -2226,7 +2226,7 @@ private:
           fwd.orientation.w = 1.0;
           request_mode_switch("moving");
           do_look_out(fwd);
-          wait_joints_still(0.02, 800);
+          wait_joints_still(0.02, 400);
 
           if (!call_pick_service_sync(step6_pick_object_name_, &target))
           {
@@ -2527,7 +2527,7 @@ private:
   // Nav integration
   std::atomic<bool> remote_busy_{false};
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr arm_mission_server_;
-  rclcpp::Client<robot_msgs::srv::StringCommand>::SharedPtr nav_event_client_;
+  rclcpp::Client<navigation::srv::StringCommand>::SharedPtr nav_event_client_;
   std::mutex cmd_mutex_;
   std::condition_variable cmd_cv_;
   bool pending_trigger_{false};

@@ -21,6 +21,7 @@ WS_SETUP="$WS_DIR/install/setup.bash"
 PARAMS_FILE="${PARAMS_FILE:-$WS_DIR/src/arm2_task/config/params.yaml}"
 DRIVER_PARAMS_FILE="${DRIVER_PARAMS_FILE:-$WS_DIR/src/dm_motor_sdk_ros/config/dm_motor_robot_driver.yaml}"
 SIM_WS="${SIM_WS:-$HOME/data/robotics/arm_mujuco_ws}"
+NAV_WS_SETUP="${NAV_WS_SETUP:-$HOME/task/nav_ws/install/setup.bash}"
 SUCTION_WS="${SUCTION_WS:-$WS_DIR}"
 SUCTION_PORT="${SUCTION_PORT:-/dev/esp32_suction_c3}"
 
@@ -239,6 +240,11 @@ echo ""
 # ------------------------------------------------------------------ #
 
 source_setup "$ROS_SETUP"
+if [[ -f "$NAV_WS_SETUP" ]]; then
+  source_setup "$NAV_WS_SETUP"
+else
+  echo "[run_arm] WARN: nav_ws setup not found ($NAV_WS_SETUP), navigation integration may not work."
+fi
 
 if [[ "$AUTO_BUILD" == "true" ]]; then
   echo "[run_arm] building packages..."
