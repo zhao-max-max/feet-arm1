@@ -748,7 +748,7 @@ std::shared_ptr<ControlNode::TrajSegment> ControlNode::plan_trapezoid(const Eige
     Eigen::VectorXd delta_q = (end - start).cwiseAbs();
 
     // 2. 初始化最大所需时间
-    double max_t = 0.5; // 设定一个最小时间阈值（如0.5秒），防止瞬移导致的冲击
+    double max_t = 0.2; // 设定一个最小时间阈值（提速：0.5→0.2s），防止瞬移导致的冲击
 
     // 3. 遍历每个关节，根据速度和加速度限制计算该轴所需时间
     // 这里采用简化的梯形/五次多项式时间估算公式：

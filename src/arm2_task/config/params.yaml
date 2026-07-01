@@ -52,7 +52,7 @@
       #3. 运动模式 (MOVING): 标准增益，兼顾响应速度和稳定性，用于瞭望、俯瞰等空载移动
       moving:
         kd: [2.2, 8.0, 6.5, 2.2, 0.1]
-        kp: [8.5, 25.0, 20.0, 8.2, 0.5]
+        kp: [13.0, 25.0, 30.0, 15.0, 0.5]
   
 # 新增：负载识别与判定的配置
     payload_management:
@@ -68,7 +68,7 @@
     # 预设动作点 (角度制)
     presets:
       load:     [0.0,  90.0, -80.0, -90.0, 0.0]   # 俯瞰姿态，相机朝正下方   之前第三个是-90(因为虚位)
-      look_out: [-90.0, 90.0, -145.0, 0.0,  0.0]   # 瞭望姿态，相机朝斜下方
+      look_out: [0.0, 90.0, -145.0, 0.0,  0.0]   # 瞭望姿态，相机朝斜下方
       reset:    [0.0, 175.0, -170.0, 10.0, 0.0]   # 收回/待机
       carry:    [0.0, 175.0, -140.0, 10.0, 0.0]   # 持箱收回姿态（带负载），角度同 reset，按需调整
     # 机器人几何参数 (用于解析逆解)
@@ -88,8 +88,8 @@
       min_segment_duration: 0.3
       log_targets: false
       dist_threshold: 0.05
-      max_acceleration: 1.5
-      max_velocity: 1.1   #0.7
+      max_acceleration: 4.0   #1.5
+      max_velocity: 3.0  #0.7
     task:
       require_payload_service: false
       require_suction_service: false
@@ -103,7 +103,7 @@
       pre_grasp_offset:   0.10    # 预抓取悬停高度偏移 (m)
       tool_offset_x:      0.0    # 工具坐标系偏移0.02 0.05
       tool_offset_y:      0.0
-      tool_offset_z:      0.0    #有些挤压到机械臂，但精准度会好一些  # 工具坐标系偏移（补偿 base_link Z=0.38m 偏置）  之前是-0.17
+      tool_offset_z:      0.02    #有些挤压，但精准度会好一些  # 工具坐标系偏移（补偿 base_link Z=0.38m 偏置）  之前是-0.17
       tool_tip_length:    0.0     # 吸盘接触面到 Link_5 origin 的距离 (m)，沿末端方向补偿
       pick_object_name:  "box"    # 传给 get_pick_pos 服务的物体名
       use_mock_target:    false   # true 时 case6 用固定坐标（调试用）

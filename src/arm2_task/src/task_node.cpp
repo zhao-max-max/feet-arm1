@@ -6,6 +6,7 @@
 #include <condition_variable>
 #include <deque>
 #include <iostream>
+#include <iomanip>
 #include <limits>
 #include <map>
 #include <memory>
@@ -1442,7 +1443,7 @@ private:
     target_pub_->publish(target);
     request_mode_switch("moving");
     do_look_out(target);
-    wait_joints_still(0.02, 400);
+    wait_joints_still(0.02, 200);
 
     if (!do_grasp_move(target))
     {
@@ -1462,7 +1463,7 @@ private:
     target_pub_->publish(target);
     request_mode_switch("moving");
     do_look_out(target);
-    wait_joints_still(0.02, 400);
+    wait_joints_still(0.02, 200);
 
     // 多次感知取中位数：消除视觉返回不同等效边导致的 roll 跳变
     constexpr int N = 3;
@@ -1567,7 +1568,7 @@ private:
     fwd.position.z = 0.0;
     fwd.orientation.w = 1.0;
     do_look_out(fwd);
-    wait_joints_still(0.02, 400);
+    wait_joints_still(0.02, 200);
 
     RCLCPP_INFO(get_logger(), "[Phase1] At look_out. Select input mode:");
     std::cout << "\n[Phase1/Scan] Sensor input: (r)eal sensor / (m)anual input / (a)bort: ";
@@ -1635,7 +1636,7 @@ private:
     {
       return false;
     }
-    wait_joints_still(0.02, 400);
+    wait_joints_still(0.02, 200);
 
     // 记录进入 Phase 2 时的末端 Z（全程固定，只调 XY）
     double fixed_z;
@@ -1920,7 +1921,7 @@ private:
     fwd.orientation.w = 1.0;
     request_mode_switch("moving");
     do_look_out(fwd);
-    wait_joints_still(0.02, 400);
+    wait_joints_still(0.02, 200);
 
     if (!call_pick_service_sync(step6_pick_object_name_, &target))
     {
@@ -2089,6 +2090,9 @@ private:
         return;
       }
 
+      // 从用户输入有效命令的这一刻开始计时
+      auto cmd_start_time = std::chrono::steady_clock::now();
+
       Eigen::VectorXd q_(5);
 
       switch (input_cmd)
@@ -2226,7 +2230,7 @@ private:
           fwd.orientation.w = 1.0;
           request_mode_switch("moving");
           do_look_out(fwd);
-          wait_joints_still(0.02, 400);
+          wait_joints_still(0.02, 200);
 
           if (!call_pick_service_sync(step6_pick_object_name_, &target))
           {
@@ -2412,6 +2416,15 @@ private:
         RCLCPP_WARN(this->get_logger(), "Unknown command: %d", input_cmd);
         break;
       }
+
+      // 计算并输出从输入命令到流程执行完毕所花费的时间
+      auto cmd_elapsed = std::chrono::duration<double>(
+                             std::chrono::steady_clock::now() - cmd_start_time)
+                             .count();
+      std::cout << "\033[1;33m[Timing]\033[0m cmd " << input_cmd
+                << " took " << std::fixed << std::setprecision(3)
+                << cmd_elapsed << " s\n"
+                << std::flush;
     }
   }
 
