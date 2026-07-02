@@ -15,6 +15,8 @@ log/
 # 编译缓存
 *.o
 *.so
+# 豁免达妙电机 SDK 驱动（允许将其上传到仓库）
+!src/dm_motor_sdk_ros/third_party/dm_sdk/linux/libdm_device.so
 *.a
 *.pyc
 __pycache__/
