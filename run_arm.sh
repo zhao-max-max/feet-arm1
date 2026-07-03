@@ -353,16 +353,27 @@ fi
 TASK_LOG="/tmp/task_node_debug.log"
 TASK_TITLE="Arm Task Control Panel [$TASK_MODE]"
 echo "[run_arm] launching task_node ($TASK_MODE)... (log: $TASK_LOG)"
+# 终端调试模式必须直启节点。ros2 launch 不会把 stdin 稳定转发给 task_node，
+# 会导致交互菜单中的数字命令无法被 std::cin 读取。
+TASK_RUNNER='
+if [[ "$TASK_MODE" == "terminal" ]]; then
+  ros2 run arm2_task task_node \
+    --ros-args --params-file "$TASK_PARAMS_FILE" -p task.manual_mode:=true
+else
+  ros2 launch arm2_task task_node.launch.py \
+    mode:="$TASK_MODE" params_path:="$TASK_PARAMS_FILE"
+fi 2>&1 | tee "$TASK_LOG"
+'
 if [[ "$TASK_IN_XTERM" == "true" ]]; then
   launch_in_group TASK_PID \
     xterm -hold -u8 -T "$TASK_TITLE" \
       -fn "-misc-fixed-medium-r-normal--18-120-100-100-c-90-iso10646-1" \
       -e env TASK_MODE="$TASK_MODE" TASK_PARAMS_FILE="$TASK_PARAMS_FILE" TASK_LOG="$TASK_LOG" \
-        bash -lc 'ros2 launch arm2_task task_node.launch.py mode:="$TASK_MODE" params_path:="$TASK_PARAMS_FILE" 2>&1 | tee "$TASK_LOG"'
+        bash -lc "$TASK_RUNNER"
 else
   launch_in_group TASK_PID \
     env TASK_MODE="$TASK_MODE" TASK_PARAMS_FILE="$TASK_PARAMS_FILE" TASK_LOG="$TASK_LOG" \
-      bash -lc 'ros2 launch arm2_task task_node.launch.py mode:="$TASK_MODE" params_path:="$TASK_PARAMS_FILE" 2>&1 | tee "$TASK_LOG"'
+      bash -lc "$TASK_RUNNER"
 fi
 
 echo ""
