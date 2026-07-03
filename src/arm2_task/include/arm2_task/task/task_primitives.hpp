@@ -81,6 +81,7 @@ public:
 
   bool do_full_grasp(const geometry_msgs::msg::Pose & target);
   bool do_full_grasp_aligned(const geometry_msgs::msg::Pose & target);
+  bool do_grasp_from_current_view();
   bool do_full_place(const geometry_msgs::msg::Pose & target);
 
 private:

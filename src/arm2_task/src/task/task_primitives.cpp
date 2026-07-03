@@ -578,6 +578,68 @@ bool TaskPrimitives::do_full_grasp_aligned(const geometry_msgs::msg::Pose & targ
   return true;
 }
 
+bool TaskPrimitives::do_grasp_from_current_view()
+{
+  request_mode_switch("moving");
+  wait_joints_still(0.02, 200);
+
+  constexpr int kSamples = 3;
+  std::vector<geometry_msgs::msg::Pose> samples;
+  for (int i = 0; i < kSamples; ++i) {
+    geometry_msgs::msg::Pose p;
+    if (perception_client_->call_pick_service_sync(config_.pick_object_name, &p)) {
+      samples.push_back(p);
+    } else {
+      RCLCPP_WARN(node_->get_logger(), "[grasp_current_view] sample %d/%d failed", i + 1, kSamples);
+    }
+  }
+
+  if (samples.empty()) {
+    RCLCPP_ERROR(node_->get_logger(), "[grasp_current_view] all perception samples failed.");
+    return false;
+  }
+
+  std::vector<double> xs;
+  std::vector<double> ys;
+  std::vector<double> zs;
+  std::vector<double> rolls;
+  xs.reserve(samples.size());
+  ys.reserve(samples.size());
+  zs.reserve(samples.size());
+  rolls.reserve(samples.size());
+  for (const auto & sample : samples) {
+    xs.push_back(sample.position.x);
+    ys.push_back(sample.position.y);
+    zs.push_back(sample.position.z);
+    rolls.push_back(get_box_edge_roll(sample));
+  }
+
+  std::sort(xs.begin(), xs.end());
+  std::sort(ys.begin(), ys.end());
+  std::sort(zs.begin(), zs.end());
+  std::sort(rolls.begin(), rolls.end());
+  const auto median = samples.size() / 2;
+
+  geometry_msgs::msg::Pose refined = samples[median];
+  refined.position.x = xs[median];
+  refined.position.y = ys[median];
+  refined.position.z = zs[median];
+  const double roll = apply_roll_continuity(rolls[median]);
+
+  target_pub_->publish(refined);
+  RCLCPP_INFO(
+    node_->get_logger(),
+    "[grasp_current_view] %zu samples from ready yaw, median pos=(%.3f,%.3f,%.3f) roll=%.3f rad (%.1f deg)",
+    samples.size(), refined.position.x, refined.position.y, refined.position.z,
+    roll, roll * 180.0 / M_PI);
+
+  if (!do_grasp_move(refined, roll)) {
+    return false;
+  }
+  do_suction_on();
+  return true;
+}
+
 bool TaskPrimitives::do_full_place(const geometry_msgs::msg::Pose & target)
 {
   target_pub_->publish(target);

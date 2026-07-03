@@ -67,17 +67,7 @@ bool TaskSequences::grasp_from_perception()
 
 bool TaskSequences::grasp_from_current_view()
 {
-  geometry_msgs::msg::Pose target;
-
-  motion_client_->request_mode_switch("moving");
-  primitives_->wait_joints_still(0.02, 200);
-
-  if (!perception_client_->call_pick_service_sync(config_.pick_object_name, &target)) {
-    RCLCPP_ERROR(node_->get_logger(), "[grasp_current_view] Perception failed.");
-    return false;
-  }
-
-  return grasp_pose(target, true);
+  return primitives_->do_grasp_from_current_view();
 }
 
 bool TaskSequences::grasp_mock_or_perception()

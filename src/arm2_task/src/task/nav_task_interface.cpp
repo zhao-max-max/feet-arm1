@@ -114,6 +114,12 @@ NavTaskInterface::NavTaskInterface(
   nav_event_client_ = node_->create_client<navigation::srv::StringCommand>(
     "/navigation/arm_event");
 
+  lookout_realign_timer_ = node_->create_wall_timer(
+    1s,
+    [this]() {
+      request_lookout_realign();
+    });
+
   RCLCPP_INFO(
     node_->get_logger(),
     "Nav integration ready: /arm/mission_event MissionCommand server + /navigation/arm_event client.");
@@ -284,6 +290,83 @@ bool NavTaskInterface::do_grasp_sequence(const MissionCommand & command)
   return true;
 }
 
+void NavTaskInterface::cache_active_ready_command(const MissionCommand & command)
+{
+  std::lock_guard<std::mutex> lk(cmd_mutex_);
+  active_ready_command_ = command;
+  lookout_realign_requested_ = false;
+}
+
+void NavTaskInterface::clear_active_ready_command()
+{
+  std::lock_guard<std::mutex> lk(cmd_mutex_);
+  active_ready_command_.reset();
+  lookout_realign_requested_ = false;
+}
+
+std::optional<NavTaskInterface::MissionCommand> NavTaskInterface::active_ready_command_copy()
+{
+  std::lock_guard<std::mutex> lk(cmd_mutex_);
+  return active_ready_command_;
+}
+
+void NavTaskInterface::request_lookout_realign()
+{
+  {
+    std::lock_guard<std::mutex> lk(cmd_mutex_);
+    if (!active_ready_command_.has_value()) {
+      return;
+    }
+    lookout_realign_requested_ = true;
+  }
+  cmd_cv_.notify_one();
+}
+
+bool NavTaskInterface::do_periodic_lookout_align()
+{
+  if (state_ != arm2_task::TaskState::LOOKOUT) {
+    clear_active_ready_command();
+    return false;
+  }
+
+  const auto command = active_ready_command_copy();
+  if (!command.has_value()) {
+    return false;
+  }
+
+  arm2_task::task::RelativePlanarPose relative_pose;
+  if (!compute_command_relative_pose(*command, &relative_pose)) {
+    RCLCPP_WARN(
+      node_->get_logger(),
+      "[nav] Periodic lookout realign skipped: failed to compute relative pose for task_index=%u.",
+      command->task_index);
+    return false;
+  }
+
+  geometry_msgs::msg::Pose look_target;
+  look_target.position.x = relative_pose.x;
+  look_target.position.y = relative_pose.y;
+  look_target.position.z = 0.0;
+  look_target.orientation.w = 1.0;
+
+  const double lookout_yaw = std::atan2(relative_pose.y, relative_pose.x);
+  RCLCPP_INFO(
+    node_->get_logger(),
+    "[nav] Periodic lookout realign task_index=%u target_id=%d arm=(x=%.3f, y=%.3f), joint0_yaw=%.3f rad (%.1f deg).",
+    command->task_index,
+    relative_pose.task_pose.id,
+    relative_pose.x,
+    relative_pose.y,
+    lookout_yaw,
+    lookout_yaw * 180.0 / M_PI);
+
+  if (!primitives_->do_look_out(look_target)) {
+    RCLCPP_WARN(node_->get_logger(), "[nav] Periodic lookout realign failed.");
+    return false;
+  }
+  return true;
+}
+
 bool NavTaskInterface::do_ready_sequence(const MissionCommand & command)
 {
   arm2_task::task::RelativePlanarPose relative_pose;
@@ -313,6 +396,7 @@ bool NavTaskInterface::do_ready_sequence(const MissionCommand & command)
   }
 
   state_ = arm2_task::TaskState::LOOKOUT;
+  cache_active_ready_command(command);
   return true;
 }
 
@@ -334,6 +418,7 @@ bool NavTaskInterface::execute_mission_command(const MissionCommand & command)
   log_mission_command(command);
 
   if (command.action == "ready") {
+    clear_active_ready_command();
     if (state_ != arm2_task::TaskState::IDLE && state_ != arm2_task::TaskState::LOOKOUT) {
       RCLCPP_WARN(
         node_->get_logger(),
@@ -347,6 +432,7 @@ bool NavTaskInterface::execute_mission_command(const MissionCommand & command)
   }
 
   if (command.action == "pickup") {
+    clear_active_ready_command();
     if (state_ != arm2_task::TaskState::IDLE && state_ != arm2_task::TaskState::LOOKOUT) {
       RCLCPP_WARN(
         node_->get_logger(),
@@ -364,6 +450,7 @@ bool NavTaskInterface::execute_mission_command(const MissionCommand & command)
   }
 
   if (command.action == "place") {
+    clear_active_ready_command();
     if (state_ != arm2_task::TaskState::HOLDING) {
       RCLCPP_WARN(
         node_->get_logger(),
@@ -390,17 +477,34 @@ void NavTaskInterface::run()
 
   while (rclcpp::ok() && is_running_->load()) {
     MissionCommand command;
+    bool has_command = false;
+    bool do_realign = false;
     {
       std::unique_lock<std::mutex> lk(cmd_mutex_);
       cmd_cv_.wait_for(
         lk,
         std::chrono::milliseconds(200),
-        [this] { return pending_command_.has_value(); });
-      if (!pending_command_) {
+        [this] { return pending_command_.has_value() || lookout_realign_requested_; });
+      if (pending_command_) {
+        command = *pending_command_;
+        pending_command_.reset();
+        lookout_realign_requested_ = false;
+        has_command = true;
+      } else if (lookout_realign_requested_) {
+        lookout_realign_requested_ = false;
+        do_realign = true;
+      } else {
         continue;
       }
-      command = *pending_command_;
-      pending_command_.reset();
+    }
+
+    if (do_realign) {
+      do_periodic_lookout_align();
+      continue;
+    }
+
+    if (!has_command) {
+      continue;
     }
 
     if (remote_busy_.exchange(true)) {

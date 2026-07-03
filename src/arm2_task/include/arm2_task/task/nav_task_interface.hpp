@@ -50,6 +50,11 @@ private:
   bool do_grasp_sequence(const MissionCommand & command);
   bool do_place_sequence();
   bool execute_mission_command(const MissionCommand & command);
+  void cache_active_ready_command(const MissionCommand & command);
+  void clear_active_ready_command();
+  std::optional<MissionCommand> active_ready_command_copy();
+  void request_lookout_realign();
+  bool do_periodic_lookout_align();
 
   rclcpp::Node * node_{nullptr};
   TaskSequences * sequences_{nullptr};
@@ -61,9 +66,12 @@ private:
   std::atomic<bool> remote_busy_{false};
   rclcpp::Service<navigation::srv::MissionCommand>::SharedPtr arm_mission_server_;
   rclcpp::Client<navigation::srv::StringCommand>::SharedPtr nav_event_client_;
+  rclcpp::TimerBase::SharedPtr lookout_realign_timer_;
   std::mutex cmd_mutex_;
   std::condition_variable cmd_cv_;
   std::optional<MissionCommand> pending_command_;
+  std::optional<MissionCommand> active_ready_command_;
+  bool lookout_realign_requested_{false};
 };
 
 }  // namespace arm2_task::task
