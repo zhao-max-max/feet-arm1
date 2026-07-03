@@ -9,6 +9,7 @@ find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(pinocchio REQUIRED)
 find_package(robot_msgs REQUIRED)
@@ -47,11 +48,24 @@ ament_target_dependencies(control_node
 
 
 # 编译任务管理节点
-add_executable(task_node src/task_node.cpp)
+add_executable(task_node
+  src/task_node.cpp
+  src/task/pose_utils.cpp
+  src/task/motion_client.cpp
+  src/task/nav_pose_tracker.cpp
+  src/task/nav_task_interface.cpp
+  src/task/perception_client.cpp
+  src/task/end_effector_client.cpp
+  src/task/task_primitives.cpp
+  src/task/task_sequences.cpp
+  src/task/terminal_task_interface.cpp
+  src/task/three_phase_pipeline.cpp
+)
 target_link_libraries(task_node arm2_algorithms)
 ament_target_dependencies(task_node
   rclcpp
   geometry_msgs
+  nav_msgs
   pinocchio
   robot_msgs
   navigation
