@@ -15,7 +15,6 @@ find_package(pinocchio REQUIRED)
 find_package(robot_msgs REQUIRED)
 find_package(navigation REQUIRED)
 find_package(std_msgs REQUIRED)
-find_package(std_srvs REQUIRED)
 find_package(ament_index_cpp REQUIRED)
 
 # 2. 包含头文件
@@ -70,7 +69,6 @@ ament_target_dependencies(task_node
   robot_msgs
   navigation
   std_msgs
-  std_srvs
   tf2
   tf2_ros
   tf2_geometry_msgs

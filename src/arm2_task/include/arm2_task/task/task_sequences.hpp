@@ -50,6 +50,7 @@ public:
     Config config);
 
   bool grasp_from_perception();
+  bool grasp_from_current_view();
   bool grasp_mock_or_perception();
   bool grasp_pose(const geometry_msgs::msg::Pose & target, bool aligned);
 

@@ -209,11 +209,11 @@ void TaskPrimitives::do_load()
   }
 }
 
-void TaskPrimitives::do_look_out(const geometry_msgs::msg::Pose & target)
+bool TaskPrimitives::do_look_out(const geometry_msgs::msg::Pose & target)
 {
   if (!presets_->count("look_out")) {
     RCLCPP_ERROR(node_->get_logger(), "Preset 'look_out' not found!");
-    return;
+    return false;
   }
   RCLCPP_INFO(
     node_->get_logger(), "[look_out] yaw toward (%.3f, %.3f)",
@@ -223,8 +223,9 @@ void TaskPrimitives::do_look_out(const geometry_msgs::msg::Pose & target)
   goal_q[0] = std::atan2(target.position.y, target.position.x);
   goal_q[4] = 0.0;
   if (send_move_goal({goal_q})) {
-    wait_for_action_completion();
+    return wait_for_action_completion();
   }
+  return false;
 }
 
 void TaskPrimitives::do_suction_on()

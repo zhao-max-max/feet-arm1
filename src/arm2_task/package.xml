@@ -20,13 +20,13 @@
   <depend>robot_msgs</depend>
   <depend>navigation</depend>
   <depend>std_msgs</depend>
-  <depend>std_srvs</depend>
   <depend>pinocchio</depend>
   <depend>ament_index_cpp</depend>
 
   <exec_depend>ament_index_python</exec_depend>
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>

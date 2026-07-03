@@ -126,18 +126,59 @@ public:
 
     const auto nav_state_topic =
         this->declare_parameter("task_nav.state_topic", std::string("/navigation/state"));
+    const auto nav_task_points_topic =
+        this->declare_parameter("task_nav.task_points_topic", std::string("/navigation/task_points"));
+    const auto nav_lidar_tf_enabled =
+        this->declare_parameter("task_nav.lidar_extrinsics.enabled", true);
+    const auto nav_lidar_tf_prefer_tf =
+        this->declare_parameter("task_nav.lidar_extrinsics.prefer_tf", true);
+    const auto nav_lidar_tf_parent =
+        this->declare_parameter("task_nav.lidar_extrinsics.parent_frame", std::string("base_link"));
+    const auto nav_lidar_tf_child =
+        this->declare_parameter("task_nav.lidar_extrinsics.child_frame", std::string("lidar_link"));
+    auto nav_lidar_tf_translation = this->declare_parameter(
+        "task_nav.lidar_extrinsics.translation",
+        std::vector<double>{0.127, 0.0, 0.0});
+    auto nav_lidar_tf_rotation_rpy = this->declare_parameter(
+        "task_nav.lidar_extrinsics.rotation_rpy",
+        std::vector<double>{0.0, 0.0, -1.570796});
+    if (nav_lidar_tf_translation.size() != 3)
+    {
+      RCLCPP_WARN(
+          this->get_logger(),
+          "task_nav.lidar_extrinsics.translation size=%zu, expected 3. Falling back to [0.127, 0.0, 0.0].",
+          nav_lidar_tf_translation.size());
+      nav_lidar_tf_translation = {0.127, 0.0, 0.0};
+    }
+    if (nav_lidar_tf_rotation_rpy.size() != 3)
+    {
+      RCLCPP_WARN(
+          this->get_logger(),
+          "task_nav.lidar_extrinsics.rotation_rpy size=%zu, expected 3. Falling back to [0.0, 0.0, -1.570796].",
+          nav_lidar_tf_rotation_rpy.size());
+      nav_lidar_tf_rotation_rpy = {0.0, 0.0, -1.570796};
+    }
     const auto nav_task_ids = this->declare_parameter(
         "task_nav.ids",
-        std::vector<int64_t>{1, 2, 3, 4, 5, 6, 7, 8});
+        std::vector<int64_t>{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12});
     const auto nav_task_x = this->declare_parameter(
         "task_nav.x",
-        std::vector<double>{2.425, 3.275, 4.125, 4.975, 2.425, 3.275, 4.125, 4.975});
+        std::vector<double>{
+            -1.251139, -0.428469, 0.391736, 1.223170,
+            1.227952, 0.405132, -0.439627, -1.260851,
+            -1.184853, -0.390241, 0.375382, 1.181787});
     const auto nav_task_y = this->declare_parameter(
         "task_nav.y",
-        std::vector<double>{-6.65, -6.65, -6.65, -6.65, -7.50, -7.50, -7.50, -7.50});
+        std::vector<double>{
+            2.427514, 2.425345, 2.424333, 2.419070,
+            1.589189, 1.587631, 1.587582, 1.589028,
+            4.910509, 4.901606, 4.902796, 4.901133});
     const auto nav_task_yaw = this->declare_parameter(
         "task_nav.yaw",
-        std::vector<double>{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0});
+        std::vector<double>{
+            0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0});
 
     // Phase-2 alignment parameters
     const double align_threshold = this->declare_parameter("visual_align.align_threshold", 0.005);
@@ -264,6 +305,15 @@ public:
 
     arm2_task::task::NavPoseTracker::Config nav_pose_config;
     nav_pose_config.state_topic = nav_state_topic;
+    nav_pose_config.task_points_topic = nav_task_points_topic;
+    nav_pose_config.tf_buffer = tf_buffer_;
+    nav_pose_config.lidar_in_arm.enabled = nav_lidar_tf_enabled;
+    nav_pose_config.lidar_in_arm.prefer_tf = nav_lidar_tf_prefer_tf;
+    nav_pose_config.lidar_in_arm.parent_frame = nav_lidar_tf_parent;
+    nav_pose_config.lidar_in_arm.child_frame = nav_lidar_tf_child;
+    nav_pose_config.lidar_in_arm.x = nav_lidar_tf_translation[0];
+    nav_pose_config.lidar_in_arm.y = nav_lidar_tf_translation[1];
+    nav_pose_config.lidar_in_arm.yaw = nav_lidar_tf_rotation_rpy[2];
     const auto nav_task_count = std::min(
         {nav_task_ids.size(), nav_task_x.size(), nav_task_y.size(), nav_task_yaw.size()});
     if (nav_task_count != nav_task_ids.size() ||

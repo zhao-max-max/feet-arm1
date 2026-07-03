@@ -63,10 +63,22 @@
 
     task_nav:
       state_topic:        /navigation/state
-      ids:                [1, 2, 3, 4, 5, 6, 7, 8]
-      x:                  [2.425, 3.275, 4.125, 4.975, 2.425, 3.275, 4.125, 4.975]
-      y:                  [-6.65, -6.65, -6.65, -6.65, -7.5, -7.5, -7.5, -7.5]
-      yaw:                [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+      task_points_topic:  /navigation/task_points
+      # 机器狗/导航 base_link 到雷达坐标系的静态外参。
+      # 等价命令：
+      # ros2 run tf2_ros static_transform_publisher --x 0.127 --y 0 --z 0 --roll 0 --pitch 0 --yaw -1.570796 --frame-id base_link --child-frame-id lidar_link
+      lidar_extrinsics:
+        enabled:          true
+        prefer_tf:        true
+        parent_frame:     base_link
+        child_frame:      lidar_link
+        translation:      [0.127, 0.0, 0.0]          # xyz, m
+        rotation_rpy:     [0.0, 0.0, -1.570796]      # roll/pitch/yaw, rad
+      # 调试阶段手动指定的地图任务点。nav 包是外部依赖，这里只维护 arm2_task 本地副本。
+      ids:                [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+      x:                  [-1.251139, -0.428469, 0.391736, 1.223170, 1.227952, 0.405132, -0.439627, -1.260851, -1.184853, -0.390241, 0.375382, 1.181787]
+      y:                  [2.427514, 2.425345, 2.424333, 2.419070, 1.589189, 1.587631, 1.587582, 1.589028, 4.910509, 4.901606, 4.902796, 4.901133]
+      yaw:                [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
     visual_align:
       align_threshold:    0.005   # Phase-2 对齐收敛阈值：末端与目标 XY 误差 (m)

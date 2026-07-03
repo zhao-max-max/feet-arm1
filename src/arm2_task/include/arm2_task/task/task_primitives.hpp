@@ -69,7 +69,7 @@ public:
   void do_reset();
   void do_reset_suction();
   void do_load();
-  void do_look_out(const geometry_msgs::msg::Pose & target);
+  bool do_look_out(const geometry_msgs::msg::Pose & target);
   void do_suction_on();
   void do_suction_off();
 
