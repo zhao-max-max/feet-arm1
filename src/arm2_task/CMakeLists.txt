@@ -87,8 +87,8 @@ install(TARGETS
   DESTINATION lib/${PROJECT_NAME}
 )
 
-# 安装配置与模型文件
-install(DIRECTORY config urdf meshes
+# 安装配置、启动文件与模型文件
+install(DIRECTORY config launch urdf meshes
   DESTINATION share/${PROJECT_NAME}
 )
 

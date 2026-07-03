@@ -68,3 +68,5 @@ htmlcov/
 *.zip
 *.tar
 *.gz
+debug_tool_logs/
+src/nav/

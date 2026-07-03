@@ -1,0 +1,8 @@
+uint32 task_index
+int32 point_id
+string action
+float64 x
+float64 y
+---
+bool success
+string message
