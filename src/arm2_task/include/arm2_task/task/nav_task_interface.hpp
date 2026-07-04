@@ -22,12 +22,18 @@ namespace arm2_task::task
 class NavTaskInterface
 {
 public:
+  struct Config
+  {
+    double place_height{0.28};
+  };
+
   NavTaskInterface(
     rclcpp::Node * node,
     TaskSequences * sequences,
     TaskPrimitives * primitives,
     NavPoseTracker * nav_pose_tracker,
-    const std::atomic<bool> * is_running);
+    const std::atomic<bool> * is_running,
+    Config config);
 
   void run();
 
@@ -58,7 +64,7 @@ private:
     const char * context);
   bool do_ready_sequence(const MissionCommand & command);
   bool do_grasp_sequence(const MissionCommand & command);
-  bool do_place_sequence();
+  bool do_place_sequence(const MissionCommand & command);
   bool execute_mission_command(const MissionCommand & command);
   void cache_active_ready_command(const MissionCommand & command);
   void clear_active_ready_command();
@@ -73,6 +79,7 @@ private:
   TaskPrimitives * primitives_{nullptr};
   NavPoseTracker * nav_pose_tracker_{nullptr};
   const std::atomic<bool> * is_running_{nullptr};
+  Config config_;
 
   arm2_task::TaskState state_{arm2_task::TaskState::IDLE};
   std::atomic<bool> remote_busy_{false};

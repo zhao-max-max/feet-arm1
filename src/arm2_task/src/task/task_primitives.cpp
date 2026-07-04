@@ -559,6 +559,98 @@ bool TaskPrimitives::do_place_move_with_orientation(
   return true;
 }
 
+bool TaskPrimitives::do_place_move_with_direct_height(
+  const geometry_msgs::msg::Pose & target)
+{
+  std::ostringstream detail;
+  detail << "target_x=" << target.position.x
+         << ",target_y=" << target.position.y
+         << ",target_z=" << target.position.z;
+  publish_timing_event(
+    node_, timing_event_pub_, "action", "place_direct_height", "begin", detail.str());
+
+  const double tool_roll = get_frame_yaw(target);
+  const double pitch = config_.grasp_pitch + config_.tool_pitch_offset;
+  const Eigen::Vector3d ee_target(
+    target.position.x,
+    target.position.y,
+    target.position.z);
+  const Eigen::Vector3d pre_target(
+    ee_target.x(), ee_target.y(), ee_target.z() + config_.place_frame_hover_height);
+
+  RCLCPP_INFO(
+    node_->get_logger(),
+    "[place_direct] ee=(%.3f, %.3f, %.3f) pre_z=%.3f pitch=%.2f roll=%.2f",
+    ee_target.x(), ee_target.y(), ee_target.z(), pre_target.z(), pitch, tool_roll);
+
+  Eigen::VectorXd q_pre(5), q_place(5);
+  if (!kin_engine_->solveIK(pre_target, pitch, tool_roll, q_pre)) {
+    RCLCPP_ERROR(
+      node_->get_logger(),
+      "[place_direct] IK failed for pre-place (%.3f, %.3f, %.3f)",
+      pre_target.x(), pre_target.y(), pre_target.z());
+    publish_timing_event(
+      node_, timing_event_pub_, "action", "place_direct_height", "end",
+      detail.str() + ",ok=0,reason=pre_place_ik_failed");
+    return false;
+  }
+  if (!kin_engine_->solveIK(ee_target, pitch, tool_roll, q_place)) {
+    RCLCPP_ERROR(
+      node_->get_logger(),
+      "[place_direct] IK failed for place (%.3f, %.3f, %.3f)",
+      ee_target.x(), ee_target.y(), ee_target.z());
+    publish_timing_event(
+      node_, timing_event_pub_, "action", "place_direct_height", "end",
+      detail.str() + ",ok=0,reason=place_ik_failed");
+    return false;
+  }
+  q_pre[0] += config_.tool_yaw_offset;
+  q_place[0] += config_.tool_yaw_offset;
+
+  if (!send_move_goal(std::vector<Eigen::VectorXd>{q_pre, q_place})) {
+    publish_timing_event(
+      node_, timing_event_pub_, "action", "place_direct_height", "end",
+      detail.str() + ",ok=0,reason=send_goal_failed");
+    return false;
+  }
+  if (!wait_for_action_completion()) {
+    publish_timing_event(
+      node_, timing_event_pub_, "action", "place_direct_height", "end",
+      detail.str() + ",ok=0,reason=move_failed");
+    return false;
+  }
+
+  const Eigen::VectorXd q_snap = current_q_snapshot();
+  RCLCPP_INFO(node_->get_logger(), "[place_direct] suction OFF before retreat");
+  rclcpp::sleep_for(200ms);
+  do_suction_off();
+  rclcpp::sleep_for(300ms);
+
+  if (q_snap.size() == 5) {
+    const auto fk = kin_engine_->forwardKinematics(q_snap);
+    Eigen::Vector3d retreat_pos = fk.translation();
+    retreat_pos.z() += config_.place_retreat_offset;
+
+    Eigen::VectorXd q_retreat(5);
+    if (kin_engine_->solveIK(retreat_pos, pitch, tool_roll, q_retreat)) {
+      q_retreat[0] += config_.tool_yaw_offset;
+      RCLCPP_INFO(
+        node_->get_logger(), "[place_direct] retreating %.2fm upward",
+        config_.place_retreat_offset);
+      if (send_move_goal(std::vector<Eigen::VectorXd>{q_retreat})) {
+        wait_for_action_completion();
+      }
+    } else {
+      RCLCPP_WARN(node_->get_logger(), "[place_direct] retreat IK failed, skipping.");
+    }
+  }
+
+  publish_timing_event(
+    node_, timing_event_pub_, "action", "place_direct_height", "end",
+    detail.str() + ",ok=1");
+  return true;
+}
+
 bool TaskPrimitives::do_stack_move_with_orientation(
   const geometry_msgs::msg::Pose & box_top_world)
 {

@@ -78,6 +78,7 @@ public:
   bool do_grasp_move(const geometry_msgs::msg::Pose & target);
   bool do_place_move(const geometry_msgs::msg::Pose & target);
   bool do_place_move_with_orientation(const geometry_msgs::msg::Pose & frame_world);
+  bool do_place_move_with_direct_height(const geometry_msgs::msg::Pose & target);
   bool do_stack_move_with_orientation(const geometry_msgs::msg::Pose & box_top_world);
 
   bool do_full_grasp(const geometry_msgs::msg::Pose & target);

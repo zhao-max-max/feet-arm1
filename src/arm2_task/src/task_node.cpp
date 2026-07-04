@@ -128,6 +128,7 @@ public:
         this->declare_parameter("task_nav.state_topic", std::string("/navigation/state"));
     const auto nav_task_points_topic =
         this->declare_parameter("task_nav.task_points_topic", std::string("/navigation/task_points"));
+    nav_place_height_ = this->declare_parameter("task_nav.place_height", 0.28);
     const auto nav_lidar_tf_enabled =
         this->declare_parameter("task_nav.lidar_extrinsics.enabled", true);
     const auto nav_lidar_tf_prefer_tf =
@@ -339,9 +340,11 @@ public:
     nav_pose_tracker_ = std::make_unique<arm2_task::task::NavPoseTracker>(
         this, std::move(nav_pose_config));
 
+    arm2_task::task::NavTaskInterface::Config nav_interface_config;
+    nav_interface_config.place_height = nav_place_height_;
     nav_interface_ = std::make_unique<arm2_task::task::NavTaskInterface>(
         this, task_sequences_.get(), task_primitives_.get(), nav_pose_tracker_.get(),
-        &is_running_);
+        &is_running_, nav_interface_config);
 
     arm2_task::task::TerminalTaskInterface::Config terminal_config;
     terminal_config.require_payload_service = require_payload_service_;
@@ -536,6 +539,8 @@ private:
   double stack_mock_y_{0.0};
   double stack_mock_z_{0.1};
   double stack_mock_yaw_{0.0};
+
+  double nav_place_height_{0.28};
 
   // Presets
   std::map<std::string, Eigen::VectorXd> presets_;

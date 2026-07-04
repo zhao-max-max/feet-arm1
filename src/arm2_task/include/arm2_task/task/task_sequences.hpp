@@ -58,6 +58,7 @@ public:
   bool place_from_perception();
   bool place_mock_or_perception();
   bool place_pose(const geometry_msgs::msg::Pose & frame_pose);
+  bool place_pose_direct_height(const geometry_msgs::msg::Pose & target_pose);
 
   bool stack_mock_or_perception();
   bool stack_pose(const geometry_msgs::msg::Pose & box_top_pose);

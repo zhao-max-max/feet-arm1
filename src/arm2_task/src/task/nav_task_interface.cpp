@@ -17,12 +17,14 @@ NavTaskInterface::NavTaskInterface(
   TaskSequences * sequences,
   TaskPrimitives * primitives,
   NavPoseTracker * nav_pose_tracker,
-  const std::atomic<bool> * is_running)
+  const std::atomic<bool> * is_running,
+  Config config)
 : node_(node),
   sequences_(sequences),
   primitives_(primitives),
   nav_pose_tracker_(nav_pose_tracker),
-  is_running_(is_running)
+  is_running_(is_running),
+  config_(config)
 {
   const auto debug_qos = rclcpp::QoS(rclcpp::KeepLast(10)).reliable().transient_local();
   mission_request_debug_pub_ =
@@ -651,13 +653,51 @@ bool NavTaskInterface::do_ready_sequence(const MissionCommand & command)
   return true;
 }
 
-bool NavTaskInterface::do_place_sequence()
+bool NavTaskInterface::do_place_sequence(const MissionCommand & command)
 {
-  publish_timing_event(node_, timing_event_pub_, "mission", "place_sequence", "begin");
-  if (!sequences_->place_from_perception()) {
+  std::ostringstream detail;
+  detail << "task_index=" << command.task_index
+         << ",point_id=" << command.point_id
+         << ",place_height=" << config_.place_height;
+  publish_timing_event(node_, timing_event_pub_, "mission", "place_sequence", "begin", detail.str());
+
+  arm2_task::task::RelativePlanarPose relative_pose;
+  if (!compute_command_relative_pose(command, &relative_pose)) {
+    RCLCPP_ERROR(
+      node_->get_logger(),
+      "[nav] Place failed: unable to compute arm-relative place pose for task_index=%u.",
+      command.task_index);
     publish_timing_event(
       node_, timing_event_pub_, "mission", "place_sequence", "end",
-      "ok=0,reason=place_failed");
+      detail.str() + ",ok=0,reason=relative_pose_failed");
+    return false;
+  }
+
+  geometry_msgs::msg::Pose place_pose;
+  place_pose.position.x = relative_pose.x;
+  place_pose.position.y = relative_pose.y;
+  place_pose.position.z = config_.place_height;
+  place_pose.orientation.x = 0.0;
+  place_pose.orientation.y = 0.0;
+  place_pose.orientation.z = std::sin(relative_pose.yaw / 2.0);
+  place_pose.orientation.w = std::cos(relative_pose.yaw / 2.0);
+
+  RCLCPP_INFO(
+    node_->get_logger(),
+    "[nav] Place from task point task_index=%u target_id=%d arm=(x=%.3f, y=%.3f, z=%.3f, yaw=%.3f rad %.1f deg).",
+    command.task_index,
+    relative_pose.task_pose.id,
+    place_pose.position.x,
+    place_pose.position.y,
+    place_pose.position.z,
+    relative_pose.yaw,
+    relative_pose.yaw * 180.0 / M_PI);
+
+  if (!sequences_->place_pose_direct_height(place_pose)) {
+    publish_timing_event(
+      node_, timing_event_pub_, "mission", "place_sequence", "end",
+      detail.str() + ",ok=0,reason=place_failed,target_id=" +
+      std::to_string(relative_pose.task_pose.id));
     return false;
   }
 
@@ -665,7 +705,12 @@ bool NavTaskInterface::do_place_sequence()
   send_nav_event("placed");
   primitives_->do_reset();
   send_nav_event("completed");
-  publish_timing_event(node_, timing_event_pub_, "mission", "place_sequence", "end", "ok=1");
+  publish_timing_event(
+    node_, timing_event_pub_, "mission", "place_sequence", "end",
+    detail.str() + ",ok=1,target_id=" + std::to_string(relative_pose.task_pose.id) +
+    ",rel_x=" + std::to_string(relative_pose.x) +
+    ",rel_y=" + std::to_string(relative_pose.y) +
+    ",yaw=" + std::to_string(relative_pose.yaw));
   return true;
 }
 
@@ -739,7 +784,7 @@ bool NavTaskInterface::execute_mission_command(const MissionCommand & command)
     }
 
     RCLCPP_INFO(node_->get_logger(), "[nav] Executing place sequence...");
-    if (do_place_sequence()) {
+    if (do_place_sequence(command)) {
       set_task_state(arm2_task::TaskState::IDLE, "place_complete");
       publish_timing_event(
         node_, timing_event_pub_, "mission", "execute_command", "end",

@@ -64,6 +64,7 @@
     task_nav:
       state_topic:        /navigation/state
       task_points_topic:  /navigation/task_points
+      place_height:       0.28
       # 机器狗/导航 base_link 到雷达坐标系的静态外参。
       # 等价命令：
       # ros2 run tf2_ros static_transform_publisher --x 0.127 --y 0 --z 0 --roll 0 --pitch 0 --yaw -1.570796 --frame-id base_link --child-frame-id lidar_link

@@ -207,6 +207,23 @@ bool TaskSequences::place_pose(const geometry_msgs::msg::Pose & frame_pose)
   return true;
 }
 
+bool TaskSequences::place_pose_direct_height(const geometry_msgs::msg::Pose & target_pose)
+{
+  publish_timing_event(node_, timing_event_pub_, "sequence", "place_pose_direct_height", "begin");
+  motion_client_->request_mode_switch("moving");
+  if (!primitives_->do_place_move_with_direct_height(target_pose)) {
+    RCLCPP_ERROR(node_->get_logger(), "[place_direct] Place move failed.");
+    publish_timing_event(
+      node_, timing_event_pub_, "sequence", "place_pose_direct_height", "end",
+      "ok=0,reason=place_move_failed");
+    return false;
+  }
+  motion_client_->request_mode_switch("moving");
+  publish_timing_event(
+    node_, timing_event_pub_, "sequence", "place_pose_direct_height", "end", "ok=1");
+  return true;
+}
+
 bool TaskSequences::stack_mock_or_perception()
 {
   publish_timing_event(node_, timing_event_pub_, "sequence", "stack_mock_or_perception", "begin");
