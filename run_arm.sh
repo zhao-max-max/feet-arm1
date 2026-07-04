@@ -14,6 +14,7 @@ SIM_MODE="${SIM_MODE:-false}"           # true=仿真, false=真机
 TASK_IN_XTERM="${TASK_IN_XTERM:-true}"  # true=task_node 弹 xterm 窗口
 AUTO_BUILD="${AUTO_BUILD:-false}"        # true=启动前自动编译
 TASK_MODE="${TASK_MODE:-nav}"            # nav=导航任务模式, terminal=终端调试模式
+DEBUG_TOOL_ENABLED="${DEBUG_TOOL_ENABLED:-false}"  # true=启动 debug_tool_node
 
 # ===== 路径 =====
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -38,6 +39,7 @@ DRIVER_PID=""
 CONTROL_PID=""
 SUCTION_PID=""
 TASK_PID=""
+DEBUG_TOOL_PID=""
 CLEANUP_RUNNING=0
 ROS2_DAEMON_PATTERN='[r]os2cli\.daemon\.daemonize.*--name ros2-daemon'
 declare -a ROS2_DAEMON_PIDS_BEFORE=()
@@ -68,6 +70,7 @@ Options:
   --nav                task_node 使用导航模式（默认）
   --terminal           task_node 使用终端调试模式
   --task-mode <mode>   task_node 模式：nav 或 terminal（默认 nav）
+  --debug-tool         启动 debug_tool_node（run_arm_nav.sh 默认开启）
   --no-xterm           task_node 输出到当前终端，不弹 xterm（SSH 场景）
   --build              启动前先编译 dm_motor_sdk_ros 和 arm2_task
   --params <file>      指定 control_node params.yaml 路径
@@ -81,6 +84,7 @@ Options:
   TASK_IN_XTERM=false  等同于 --no-xterm
   AUTO_BUILD=true      等同于 --build
   TASK_MODE=terminal   等同于 --terminal
+  DEBUG_TOOL_ENABLED=true 等同于 --debug-tool
   PARAMS_FILE=<path>   等同于 --params（control_node）
   TASK_PARAMS_FILE=<p> 等同于 --task-params（task_node）
   SIM_WS=<path>        等同于 --sim-ws
@@ -147,6 +151,7 @@ cleanup() {
   CLEANUP_RUNNING=1
   echo "[run_arm] shutting down..."
   stop_process_group "$TASK_PID"    "task_node"
+  stop_process_group "$DEBUG_TOOL_PID" "debug_tool_node"
   stop_process_group "$SUCTION_PID" "suction_service_node"
   stop_process_group "$CONTROL_PID" "control_node"
   stop_process_group "$DRIVER_PID"  "dm_motor_sdk_ros driver"
@@ -212,6 +217,7 @@ while [[ $# -gt 0 ]]; do
     --nav)            TASK_MODE=nav;           shift ;;
     --terminal)       TASK_MODE=terminal;      shift ;;
     --task-mode)      TASK_MODE="$2";          shift 2 ;;
+    --debug-tool)     DEBUG_TOOL_ENABLED=true; shift ;;
     --no-xterm)       TASK_IN_XTERM=false;     shift ;;
     --build)          AUTO_BUILD=true;         shift ;;
     --params)         PARAMS_FILE="$2";        shift 2 ;;
@@ -253,6 +259,7 @@ echo "  control params: $PARAMS_FILE"
 echo "  task params  : $TASK_PARAMS_FILE"
 echo "  mode         : $([ "$SIM_MODE" == "true" ] && echo "仿真（MuJoCo）" || echo "真机（Damiao CAN）")"
 echo "  task_mode    : $TASK_MODE"
+echo "  debug_tool   : $DEBUG_TOOL_ENABLED"
 echo "  task_in_xterm: $TASK_IN_XTERM"
 echo ""
 
@@ -269,8 +276,12 @@ fi
 
 if [[ "$AUTO_BUILD" == "true" ]]; then
   echo "[run_arm] building packages..."
+  BUILD_PACKAGES=(robot_msgs suction_serial_bridge dm_motor_sdk_ros arm2_task)
+  if [[ "$DEBUG_TOOL_ENABLED" == "true" ]]; then
+    BUILD_PACKAGES+=(debug_tool)
+  fi
   (cd "$WS_DIR" && colcon build \
-    --packages-select robot_msgs suction_serial_bridge dm_motor_sdk_ros arm2_task \
+    --packages-select "${BUILD_PACKAGES[@]}" \
     --cmake-args -DCMAKE_BUILD_TYPE=Release)
 fi
 
@@ -347,6 +358,22 @@ elif [[ "$SIM_MODE" == "false" ]]; then
 fi
 
 # ------------------------------------------------------------------ #
+#  调试层：debug_tool_node（可选）
+# ------------------------------------------------------------------ #
+
+if [[ "$DEBUG_TOOL_ENABLED" == "true" ]]; then
+  echo "[run_arm] launching debug_tool_node..."
+  launch_in_group DEBUG_TOOL_PID \
+    ros2 launch debug_tool debug_tool_node.launch.py
+
+  sleep 1
+  if ! kill -0 "$DEBUG_TOOL_PID" 2>/dev/null; then
+    echo "[run_arm] ERROR: debug_tool_node failed to start." >&2
+    exit 1
+  fi
+fi
+
+# ------------------------------------------------------------------ #
 #  任务层：task_node（可选 xterm）
 # ------------------------------------------------------------------ #
 
@@ -380,6 +407,7 @@ echo ""
 echo "[run_arm] 所有节点已启动。按 Ctrl+C 全部停止。"
 echo "  control_node pid: $CONTROL_PID"
 echo "  task_node    pid: $TASK_PID"
+[[ -n "$DEBUG_TOOL_PID" ]] && echo "  debug_tool   pid: $DEBUG_TOOL_PID"
 [[ -n "$SUCTION_PID" ]] && echo "  suction_node  pid: $SUCTION_PID"
 [[ -n "$DRIVER_PID" ]] && echo "  driver       pid: $DRIVER_PID"
 echo ""
