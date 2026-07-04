@@ -13,6 +13,7 @@
 #include "rclcpp_action/rclcpp_action.hpp"
 #include "robot_msgs/action/move_joint.hpp"
 #include "robot_msgs/srv/set_controller_mode.hpp"
+#include "std_msgs/msg/string.hpp"
 
 namespace arm2_task::task
 {
@@ -56,6 +57,9 @@ private:
   double max_v_{1.0};
   double max_a_{2.0};
   double blend_radius_{0.05};
+  int move_goal_sequence_{0};
+  int active_move_goal_sequence_{0};
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr timing_event_pub_;
 };
 
 }  // namespace arm2_task::task

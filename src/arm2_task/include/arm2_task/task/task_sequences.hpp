@@ -10,6 +10,7 @@
 #include "arm2_task/task/task_primitives.hpp"
 #include "geometry_msgs/msg/pose.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "std_msgs/msg/string.hpp"
 
 namespace arm2_task::task
 {
@@ -77,6 +78,7 @@ private:
   TaskPrimitives * primitives_{nullptr};
   const std::map<std::string, Eigen::VectorXd> * presets_{nullptr};
   Config config_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr timing_event_pub_;
 };
 
 }  // namespace arm2_task::task

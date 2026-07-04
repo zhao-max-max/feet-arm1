@@ -2,9 +2,11 @@
 #include <chrono>
 #include <cmath>
 #include <ctime>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <sstream>
@@ -28,6 +30,7 @@
 #include "robot_msgs/srv/set_payload_state.hpp"
 #include "robot_msgs/srv/set_suction.hpp"
 #include "std_msgs/msg/bool.hpp"
+#include "std_msgs/msg/string.hpp"
 
 using namespace std::chrono_literals;
 
@@ -83,6 +86,7 @@ public:
   {
     start_wall_time_ = std::chrono::system_clock::now();
     start_ros_time_ = now();
+    start_file_stem_ = make_start_timestamp();
 
     state_topic_ = declare_parameter<std::string>("state_topic", "/arm2/_lowState/joint");
     command_topic_ = declare_parameter<std::string>("command_topic", "/arm2/_lowCmd/command");
@@ -104,6 +108,8 @@ public:
     nav_arm_event_response_topic_ =
       declare_parameter<std::string>(
       "nav_arm_event_response_topic", "/debug/nav/arm_event_response");
+    timing_event_topic_ =
+      declare_parameter<std::string>("timing_event_topic", "/debug/arm_task_timing");
     motor_count_ = declare_parameter<int>("motor_count", 5);
     csv_enabled_ = declare_parameter<bool>("csv_enabled", true);
     csv_dir_ = declare_parameter<std::string>("csv_dir", "debug_tool_logs");
@@ -228,6 +234,15 @@ public:
         has_nav_arm_event_response_ = true;
       });
 
+    timing_event_sub_ = create_subscription<std_msgs::msg::String>(
+      timing_event_topic_, rclcpp::QoS(rclcpp::KeepLast(200)).reliable(),
+      [this](const std_msgs::msg::String::SharedPtr msg) {
+        if (!msg) {
+          return;
+        }
+        handle_timing_event(msg->data);
+      });
+
     mode_client_ = create_client<robot_msgs::srv::SetControllerMode>("set_controller_mode");
     suction_client_ = create_client<robot_msgs::srv::SetSuction>("set_suction");
     pick_client_ = create_client<robot_msgs::srv::GetPickPos>("get_pick_pos");
@@ -254,13 +269,15 @@ public:
       "nav_state_topic=%s nav_task_points_topic=%s arm_mission_service=%s "
       "nav_arm_event_service=%s nav_mission_request_topic=%s "
       "nav_mission_response_topic=%s nav_arm_event_request_topic=%s "
-      "nav_arm_event_response_topic=%s report_period=%.2fs csv=%s",
+      "nav_arm_event_response_topic=%s timing_event_topic=%s report_period=%.2fs csv=%s "
+      "timing_csv=%s",
       state_topic_.c_str(), command_topic_.c_str(), ready_topic_.c_str(),
       nav_state_topic_.c_str(), nav_task_points_topic_.c_str(), arm_mission_service_.c_str(),
       nav_arm_event_service_.c_str(), nav_mission_request_topic_.c_str(),
       nav_mission_response_topic_.c_str(), nav_arm_event_request_topic_.c_str(),
-      nav_arm_event_response_topic_.c_str(), report_period_sec,
-      csv_path_.empty() ? "disabled" : csv_path_.c_str());
+      nav_arm_event_response_topic_.c_str(), timing_event_topic_.c_str(), report_period_sec,
+      csv_path_.empty() ? "disabled" : csv_path_.c_str(),
+      timing_csv_path_.empty() ? "disabled" : timing_csv_path_.c_str());
   }
 
 private:
@@ -276,6 +293,124 @@ private:
     bool arm_mission{false};
     bool nav_arm_event{false};
   };
+
+  struct TimingEvent
+  {
+    bool valid{false};
+    bool has_source_ros_time{false};
+    double source_ros_time{0.0};
+    double duration_sec{-1.0};
+    rclcpp::Time receive_ros_time{0, 0, RCL_ROS_TIME};
+    std::string source_node;
+    std::string kind;
+    std::string name;
+    std::string phase;
+    std::string detail;
+    std::string raw;
+  };
+
+  struct TimingSpanStart
+  {
+    bool has_source_ros_time{false};
+    double source_ros_time{0.0};
+    rclcpp::Time receive_ros_time{0, 0, RCL_ROS_TIME};
+  };
+
+  static std::map<std::string, std::string> parse_timing_fields(const std::string & raw)
+  {
+    std::map<std::string, std::string> fields;
+    size_t start = 0;
+    while (start <= raw.size()) {
+      const size_t end = raw.find('|', start);
+      const std::string token = raw.substr(
+        start, end == std::string::npos ? std::string::npos : end - start);
+      const size_t eq = token.find('=');
+      if (eq != std::string::npos) {
+        fields[token.substr(0, eq)] = token.substr(eq + 1);
+      }
+      if (end == std::string::npos) {
+        break;
+      }
+      start = end + 1;
+    }
+    return fields;
+  }
+
+  TimingEvent parse_timing_event(const std::string & raw)
+  {
+    TimingEvent event;
+    event.raw = raw;
+    event.receive_ros_time = now();
+
+    const auto fields = parse_timing_fields(raw);
+    const auto kind_it = fields.find("kind");
+    const auto name_it = fields.find("name");
+    const auto phase_it = fields.find("phase");
+    if (kind_it == fields.end() || name_it == fields.end() || phase_it == fields.end()) {
+      return event;
+    }
+
+    event.valid = true;
+    event.kind = kind_it->second;
+    event.name = name_it->second;
+    event.phase = phase_it->second;
+    if (const auto it = fields.find("detail"); it != fields.end()) {
+      event.detail = it->second;
+    }
+    if (const auto it = fields.find("source_node"); it != fields.end()) {
+      event.source_node = it->second;
+    }
+    if (const auto it = fields.find("source_ros_time"); it != fields.end()) {
+      try {
+        event.source_ros_time = std::stod(it->second);
+        event.has_source_ros_time = true;
+      } catch (const std::exception &) {
+        event.has_source_ros_time = false;
+      }
+    }
+    return event;
+  }
+
+  static std::string timing_span_key(const TimingEvent & event)
+  {
+    return event.kind + ":" + event.name;
+  }
+
+  void handle_timing_event(const std::string & raw)
+  {
+    TimingEvent event = parse_timing_event(raw);
+    if (!event.valid) {
+      std::lock_guard<std::mutex> lock(mutex_);
+      write_timing_csv_row(event);
+      return;
+    }
+
+    const auto key = timing_span_key(event);
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      if (event.phase == "begin") {
+        timing_span_starts_[key] = TimingSpanStart{
+          event.has_source_ros_time,
+          event.source_ros_time,
+          event.receive_ros_time};
+      } else if (event.phase == "end") {
+        const auto start_it = timing_span_starts_.find(key);
+        if (start_it != timing_span_starts_.end()) {
+          if (event.has_source_ros_time && start_it->second.has_source_ros_time) {
+            event.duration_sec = event.source_ros_time - start_it->second.source_ros_time;
+          } else {
+            event.duration_sec =
+              (event.receive_ros_time - start_it->second.receive_ros_time).seconds();
+          }
+          timing_span_starts_.erase(start_it);
+        }
+      }
+
+      last_timing_event_ = event;
+      has_timing_event_ = true;
+      write_timing_csv_row(event);
+    }
+  }
 
   void report()
   {
@@ -695,17 +830,29 @@ private:
       return;
     }
 
-    const auto filename = make_start_timestamp() + ".csv";
+    const auto stem = start_file_stem_.empty() ? make_start_timestamp() : start_file_stem_;
+    const auto filename = stem + ".csv";
     const auto path = dir / filename;
     csv_file_.open(path);
     if (!csv_file_.is_open()) {
       RCLCPP_ERROR(get_logger(), "Failed to open CSV log file: %s", path.string().c_str());
+    } else {
+      csv_path_ = path.string();
+      write_csv_header();
+      RCLCPP_INFO(get_logger(), "CSV logging enabled: %s", csv_path_.c_str());
+    }
+
+    const auto timing_path = dir / (stem + "_timing.csv");
+    timing_csv_file_.open(timing_path);
+    if (!timing_csv_file_.is_open()) {
+      RCLCPP_ERROR(
+        get_logger(), "Failed to open timing CSV log file: %s", timing_path.string().c_str());
       return;
     }
 
-    csv_path_ = path.string();
-    write_csv_header();
-    RCLCPP_INFO(get_logger(), "CSV logging enabled: %s", csv_path_.c_str());
+    timing_csv_path_ = timing_path.string();
+    write_timing_csv_header();
+    RCLCPP_INFO(get_logger(), "Timing CSV logging enabled: %s", timing_csv_path_.c_str());
   }
 
   void write_csv_header()
@@ -752,6 +899,41 @@ private:
 
     csv_file_ << "\n";
     csv_file_.flush();
+  }
+
+  void write_timing_csv_header()
+  {
+    if (!timing_csv_file_.is_open()) {
+      return;
+    }
+
+    timing_csv_file_
+      << "wall_time,event_receive_ros_time_sec,source_ros_time_sec,elapsed_sec,"
+      << "kind,name,phase,duration_sec,source_node,detail,raw\n";
+    timing_csv_file_.flush();
+  }
+
+  void write_timing_csv_row(const TimingEvent & event)
+  {
+    if (!timing_csv_file_.is_open()) {
+      return;
+    }
+
+    const double elapsed = (event.receive_ros_time - start_ros_time_).seconds();
+    timing_csv_file_ << wall_timestamp_now()
+                     << "," << std::fixed << std::setprecision(9)
+                     << event.receive_ros_time.seconds()
+                     << "," << (event.has_source_ros_time ? event.source_ros_time : 0.0)
+                     << "," << elapsed
+                     << "," << csv_escape(event.kind)
+                     << "," << csv_escape(event.name)
+                     << "," << csv_escape(event.phase)
+                     << "," << event.duration_sec
+                     << "," << csv_escape(event.source_node)
+                     << "," << csv_escape(event.detail)
+                     << "," << csv_escape(event.raw)
+                     << "\n";
+    timing_csv_file_.flush();
   }
 
   void write_csv_row(
@@ -899,13 +1081,17 @@ private:
   std::string nav_mission_response_topic_;
   std::string nav_arm_event_request_topic_;
   std::string nav_arm_event_response_topic_;
+  std::string timing_event_topic_;
   std::string csv_dir_;
   int motor_count_{5};
   bool csv_enabled_{true};
   std::chrono::system_clock::time_point start_wall_time_;
   rclcpp::Time start_ros_time_{0, 0, RCL_ROS_TIME};
+  std::string start_file_stem_;
   std::ofstream csv_file_;
   std::string csv_path_;
+  std::ofstream timing_csv_file_;
+  std::string timing_csv_path_;
 
   mutable std::mutex mutex_;
   robot_msgs::msg::RobotState last_state_;
@@ -916,6 +1102,8 @@ private:
   navigation::srv::MissionCommand::Response last_nav_mission_response_;
   navigation::srv::StringCommand::Request last_nav_arm_event_request_;
   navigation::srv::StringCommand::Response last_nav_arm_event_response_;
+  TimingEvent last_timing_event_;
+  std::map<std::string, TimingSpanStart> timing_span_starts_;
   rclcpp::Time last_state_time_{0, 0, RCL_ROS_TIME};
   rclcpp::Time last_command_time_{0, 0, RCL_ROS_TIME};
   rclcpp::Time last_ready_time_{0, 0, RCL_ROS_TIME};
@@ -934,6 +1122,7 @@ private:
   bool has_nav_mission_response_{false};
   bool has_nav_arm_event_request_{false};
   bool has_nav_arm_event_response_{false};
+  bool has_timing_event_{false};
   bool driver_ready_{false};
 
   rclcpp::Subscription<robot_msgs::msg::RobotState>::SharedPtr state_sub_;
@@ -945,6 +1134,7 @@ private:
   rclcpp::Subscription<navigation::srv::MissionCommand::Response>::SharedPtr nav_mission_response_sub_;
   rclcpp::Subscription<navigation::srv::StringCommand::Request>::SharedPtr nav_arm_event_request_sub_;
   rclcpp::Subscription<navigation::srv::StringCommand::Response>::SharedPtr nav_arm_event_response_sub_;
+  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr timing_event_sub_;
   rclcpp::Client<robot_msgs::srv::SetControllerMode>::SharedPtr mode_client_;
   rclcpp::Client<robot_msgs::srv::SetSuction>::SharedPtr suction_client_;
   rclcpp::Client<robot_msgs::srv::GetPickPos>::SharedPtr pick_client_;

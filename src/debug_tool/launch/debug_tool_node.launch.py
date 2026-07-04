@@ -60,6 +60,11 @@ def generate_launch_description():
         default_value="/debug/nav/arm_event_response",
         description="Debug topic mirroring arm_event responses",
     )
+    timing_event_topic_arg = DeclareLaunchArgument(
+        "timing_event_topic",
+        default_value="/debug/arm_task_timing",
+        description="Timing event topic published by arm2_task",
+    )
     report_period_sec_arg = DeclareLaunchArgument(
         "report_period_sec",
         default_value="1.0",
@@ -100,6 +105,7 @@ def generate_launch_description():
                 "nav_mission_response_topic": LaunchConfiguration("nav_mission_response_topic"),
                 "nav_arm_event_request_topic": LaunchConfiguration("nav_arm_event_request_topic"),
                 "nav_arm_event_response_topic": LaunchConfiguration("nav_arm_event_response_topic"),
+                "timing_event_topic": LaunchConfiguration("timing_event_topic"),
                 "report_period_sec": LaunchConfiguration("report_period_sec"),
                 "csv_enabled": LaunchConfiguration("csv_enabled"),
                 "csv_dir": LaunchConfiguration("csv_dir"),
@@ -121,6 +127,7 @@ def generate_launch_description():
             nav_mission_response_topic_arg,
             nav_arm_event_request_topic_arg,
             nav_arm_event_response_topic_arg,
+            timing_event_topic_arg,
             report_period_sec_arg,
             csv_enabled_arg,
             csv_dir_arg,

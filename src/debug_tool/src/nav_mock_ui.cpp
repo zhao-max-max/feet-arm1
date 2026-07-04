@@ -150,6 +150,7 @@ public:
   struct Snapshot
   {
     bool pose_auto_publish{true};
+    bool mock_nav_publish_enabled{true};
     double pose_publish_hz{10.0};
     double pose_x{0.0};
     double pose_y{0.0};
@@ -158,9 +159,11 @@ public:
     std::string state_child_frame_id{"base_link"};
     std::vector<TaskPointState> task_points;
     bool mission_service_ready{false};
+    bool debug_state_service_ready{false};
     bool arm_event_response_success{true};
     std::string arm_event_response_message{"ack"};
     std::string last_mission_call_status{"idle"};
+    std::string last_debug_state_call_status{"idle"};
     bool has_last_arm_event_request{false};
     std::string last_arm_event_request;
     double last_arm_event_request_age_sec{-1.0};
@@ -190,6 +193,8 @@ public:
       declare_parameter<std::string>("nav_task_points_topic", "/navigation/task_points");
     arm_mission_service_ =
       declare_parameter<std::string>("arm_mission_service", "/arm/mission_event");
+    arm_debug_state_service_ =
+      declare_parameter<std::string>("arm_debug_state_service", "/arm/debug_state_command");
     nav_arm_event_service_ =
       declare_parameter<std::string>("nav_arm_event_service", "/navigation/arm_event");
     nav_mission_request_topic_ =
@@ -207,6 +212,7 @@ public:
     state_child_frame_id_ = declare_parameter<std::string>("state_child_frame_id", "base_link");
     task_points_frame_id_ = declare_parameter<std::string>("task_points_frame_id", "map");
     pose_auto_publish_ = declare_parameter<bool>("pose_auto_publish", true);
+    mock_nav_publish_enabled_ = declare_parameter<bool>("mock_nav_publish_enabled", true);
     pose_publish_hz_ = clamp_hz(declare_parameter<double>("pose_publish_hz", 10.0));
     pose_x_ = declare_parameter<double>("initial_pose_x", 0.0);
     pose_y_ = declare_parameter<double>("initial_pose_y", 0.0);
@@ -227,6 +233,8 @@ public:
 
     arm_mission_client_ =
       create_client<navigation::srv::MissionCommand>(arm_mission_service_);
+    arm_debug_state_client_ =
+      create_client<navigation::srv::MissionCommand>(arm_debug_state_service_);
     nav_arm_event_server_ = create_service<navigation::srv::StringCommand>(
       nav_arm_event_service_,
       [this](
@@ -319,12 +327,15 @@ public:
 
     pose_timer_ = create_wall_timer(20ms, std::bind(&NavMockRosNode::maybe_publish_pose, this));
 
-    publish_task_points();
-    publish_pose_once();
+    if (mock_nav_publish_enabled_) {
+      publish_task_points();
+      publish_pose_once();
+    }
     append_log(
       "nav mock UI ready: state_topic=" + nav_state_topic_ +
       " task_points_topic=" + nav_task_points_topic_ +
       " arm_mission_service=" + arm_mission_service_ +
+      " arm_debug_state_service=" + arm_debug_state_service_ +
       " arm_event_service=" + nav_arm_event_service_);
   }
 
@@ -334,6 +345,7 @@ public:
     const auto t_now = now();
     std::lock_guard<std::mutex> lock(mutex_);
     out.pose_auto_publish = pose_auto_publish_;
+    out.mock_nav_publish_enabled = mock_nav_publish_enabled_;
     out.pose_publish_hz = pose_publish_hz_;
     out.pose_x = pose_x_;
     out.pose_y = pose_y_;
@@ -344,6 +356,7 @@ public:
     out.arm_event_response_success = arm_event_response_success_;
     out.arm_event_response_message = arm_event_response_message_;
     out.last_mission_call_status = last_mission_call_status_;
+    out.last_debug_state_call_status = last_debug_state_call_status_;
     out.has_last_arm_event_request = has_last_arm_event_request_;
     out.last_arm_event_request = last_arm_event_request_;
     out.last_arm_event_request_age_sec =
@@ -370,6 +383,7 @@ public:
       has_target_pose_ ? (t_now - last_target_pose_time_).seconds() : -1.0;
     out.logs.assign(log_lines_.begin(), log_lines_.end());
     out.mission_service_ready = arm_mission_client_->service_is_ready();
+    out.debug_state_service_ready = arm_debug_state_client_->service_is_ready();
     return out;
   }
 
@@ -395,6 +409,19 @@ public:
     append_log(std::string("pose auto publish ") + (enabled ? "enabled" : "disabled"));
   }
 
+  void set_mock_nav_publish_enabled(bool enabled)
+  {
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      mock_nav_publish_enabled_ = enabled;
+    }
+    append_log(std::string("mock /navigation publishers ") + (enabled ? "enabled" : "disabled"));
+    if (enabled) {
+      publish_task_points();
+      publish_pose_once();
+    }
+  }
+
   void set_pose_publish_hz(double hz)
   {
     {
@@ -416,6 +443,9 @@ public:
     nav_msgs::msg::Odometry msg;
     {
       std::lock_guard<std::mutex> lock(mutex_);
+      if (!mock_nav_publish_enabled_) {
+        return;
+      }
       msg.header.stamp = now();
       msg.header.frame_id = state_frame_id_;
       msg.child_frame_id = state_child_frame_id_;
@@ -442,6 +472,9 @@ public:
     std::vector<TaskPointState> points_copy;
     {
       std::lock_guard<std::mutex> lock(mutex_);
+      if (!mock_nav_publish_enabled_) {
+        return;
+      }
       points_copy = task_points_;
       msg.header.stamp = now();
       msg.header.frame_id = task_points_frame_id_;
@@ -511,6 +544,42 @@ public:
       });
   }
 
+  void send_debug_state(const std::string & action, std::uint32_t task_index)
+  {
+    if (!arm_debug_state_client_->service_is_ready()) {
+      append_log("debug state service not ready: " + arm_debug_state_service_);
+      std::lock_guard<std::mutex> lock(mutex_);
+      last_debug_state_call_status_ = "service not ready";
+      return;
+    }
+
+    auto request = std::make_shared<navigation::srv::MissionCommand::Request>();
+    request->action = action;
+    request->task_index = task_index;
+    request->point_id = static_cast<int>(task_index);
+    request->x = 0.0;
+    request->y = 0.0;
+
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      last_debug_state_call_status_ = "requesting " + format_mission_request(*request);
+    }
+    append_log("debug state request -> " + format_mission_request(*request));
+
+    arm_debug_state_client_->async_send_request(
+      request,
+      [this, action](rclcpp::Client<navigation::srv::MissionCommand>::SharedFuture future) {
+        const auto response = future.get();
+        const std::string text = response ?
+          format_mission_response(*response) : std::string("null response");
+        {
+          std::lock_guard<std::mutex> lock(mutex_);
+          last_debug_state_call_status_ = action + " => " + text;
+        }
+        append_log("debug state response <- " + text);
+      });
+  }
+
 private:
   std::vector<TaskPointState> load_default_task_points_from_parameters()
   {
@@ -556,7 +625,7 @@ private:
     double publish_hz = 10.0;
     {
       std::lock_guard<std::mutex> lock(mutex_);
-      should_publish = pose_auto_publish_;
+      should_publish = mock_nav_publish_enabled_ && pose_auto_publish_;
       publish_hz = pose_publish_hz_;
     }
 
@@ -587,6 +656,7 @@ private:
   std::string nav_state_topic_;
   std::string nav_task_points_topic_;
   std::string arm_mission_service_;
+  std::string arm_debug_state_service_;
   std::string nav_arm_event_service_;
   std::string nav_mission_request_topic_;
   std::string nav_mission_response_topic_;
@@ -597,6 +667,7 @@ private:
   std::string state_child_frame_id_;
   std::string task_points_frame_id_;
   bool pose_auto_publish_{true};
+  bool mock_nav_publish_enabled_{true};
   double pose_publish_hz_{10.0};
   double pose_x_{0.0};
   double pose_y_{0.0};
@@ -606,6 +677,7 @@ private:
   std::vector<TaskPointState> default_task_points_;
   std::vector<TaskPointState> task_points_;
   std::string last_mission_call_status_{"idle"};
+  std::string last_debug_state_call_status_{"idle"};
   bool has_last_arm_event_request_{false};
   std::string last_arm_event_request_;
   rclcpp::Time last_arm_event_request_time_{0, 0, RCL_ROS_TIME};
@@ -630,6 +702,7 @@ private:
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr nav_state_pub_;
   rclcpp::Publisher<navigation::msg::MapPointArray>::SharedPtr nav_task_points_pub_;
   rclcpp::Client<navigation::srv::MissionCommand>::SharedPtr arm_mission_client_;
+  rclcpp::Client<navigation::srv::MissionCommand>::SharedPtr arm_debug_state_client_;
   rclcpp::Service<navigation::srv::StringCommand>::SharedPtr nav_arm_event_server_;
   rclcpp::Subscription<navigation::srv::MissionCommand::Request>::SharedPtr mission_request_sub_;
   rclcpp::Subscription<navigation::srv::MissionCommand::Response>::SharedPtr mission_response_sub_;
@@ -919,6 +992,7 @@ public:
     auto * right_layout = new QVBoxLayout(right_panel);
     right_layout->addWidget(build_pose_group(right_panel));
     right_layout->addWidget(build_mission_group(right_panel));
+    right_layout->addWidget(build_arm_state_group(right_panel));
     right_layout->addWidget(build_arm_event_group(right_panel));
     right_layout->addWidget(build_debug_group(right_panel));
     right_layout->addWidget(build_task_points_group(right_panel), 1);
@@ -953,6 +1027,7 @@ private:
     pose_y_spin_ = make_double_spin(-100.0, 100.0, 3, 0.01, group);
     pose_yaw_deg_spin_ = make_double_spin(-360.0, 360.0, 1, 1.0, group);
     pose_publish_hz_spin_ = make_double_spin(0.1, 100.0, 1, 0.5, group);
+    mock_nav_publish_check_ = new QCheckBox(QStringLiteral("Mock Publish /navigation/*"), group);
     auto_publish_check_ = new QCheckBox(QStringLiteral("Auto Publish"), group);
     publish_pose_button_ = new QPushButton(QStringLiteral("Publish Once"), group);
     pose_note_label_ =
@@ -966,8 +1041,9 @@ private:
     layout->addWidget(pose_yaw_deg_spin_, 1, 1);
     layout->addWidget(new QLabel(QStringLiteral("rate (Hz)"), group), 1, 2);
     layout->addWidget(pose_publish_hz_spin_, 1, 3);
-    layout->addWidget(auto_publish_check_, 2, 0, 1, 2);
-    layout->addWidget(publish_pose_button_, 2, 2, 1, 2);
+    layout->addWidget(mock_nav_publish_check_, 2, 0, 1, 2);
+    layout->addWidget(auto_publish_check_, 2, 2, 1, 1);
+    layout->addWidget(publish_pose_button_, 2, 3, 1, 1);
     layout->addWidget(pose_note_label_, 3, 0, 1, 4);
     return group;
   }
@@ -1004,6 +1080,34 @@ private:
     layout->addWidget(use_selected_button_, 2, 2);
     layout->addWidget(send_mission_button_, 2, 3);
     layout->addWidget(mission_status_label_, 3, 0, 1, 4);
+    return group;
+  }
+
+  QWidget * build_arm_state_group(QWidget * parent)
+  {
+    auto * group = new QGroupBox(QStringLiteral("Arm State Debug"), parent);
+    auto * layout = new QGridLayout(group);
+
+    debug_state_task_index_spin_ = new QSpinBox(group);
+    debug_state_task_index_spin_->setRange(0, 1000000);
+    debug_state_task_index_spin_->setValue(1);
+    debug_state_use_selected_button_ =
+      new QPushButton(QStringLiteral("Use Selected Point"), group);
+    debug_state_idle_button_ = new QPushButton(QStringLiteral("Set IDLE"), group);
+    debug_state_lookout_button_ = new QPushButton(QStringLiteral("Move LOOKOUT"), group);
+    debug_state_holding_button_ = new QPushButton(QStringLiteral("Set HOLDING"), group);
+    debug_state_carry_holding_button_ =
+      new QPushButton(QStringLiteral("Carry + HOLDING"), group);
+    debug_state_status_label_ = new QLabel(QStringLiteral("idle"), group);
+
+    layout->addWidget(new QLabel(QStringLiteral("task_index / target id"), group), 0, 0);
+    layout->addWidget(debug_state_task_index_spin_, 0, 1);
+    layout->addWidget(debug_state_use_selected_button_, 0, 2, 1, 2);
+    layout->addWidget(debug_state_idle_button_, 1, 0);
+    layout->addWidget(debug_state_lookout_button_, 1, 1);
+    layout->addWidget(debug_state_holding_button_, 1, 2);
+    layout->addWidget(debug_state_carry_holding_button_, 1, 3);
+    layout->addWidget(debug_state_status_label_, 2, 0, 1, 4);
     return group;
   }
 
@@ -1111,6 +1215,9 @@ private:
     connect(pose_publish_hz_spin_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double value) {
       node_->set_pose_publish_hz(value);
     });
+    connect(mock_nav_publish_check_, &QCheckBox::toggled, this, [this](bool checked) {
+      node_->set_mock_nav_publish_enabled(checked);
+    });
     connect(auto_publish_check_, &QCheckBox::toggled, this, [this](bool checked) {
       node_->set_pose_publish_enabled(checked);
     });
@@ -1135,6 +1242,24 @@ private:
         point_id_spin_->value(),
         mission_x_spin_->value(),
         mission_y_spin_->value());
+    });
+
+    connect(debug_state_use_selected_button_, &QPushButton::clicked, this, [this]() {
+      if (has_selected_task_point_) {
+        debug_state_task_index_spin_->setValue(selected_task_point_id_);
+      }
+    });
+    connect(debug_state_idle_button_, &QPushButton::clicked, this, [this]() {
+      node_->send_debug_state("idle", static_cast<std::uint32_t>(debug_state_task_index_spin_->value()));
+    });
+    connect(debug_state_lookout_button_, &QPushButton::clicked, this, [this]() {
+      node_->send_debug_state("lookout", static_cast<std::uint32_t>(debug_state_task_index_spin_->value()));
+    });
+    connect(debug_state_holding_button_, &QPushButton::clicked, this, [this]() {
+      node_->send_debug_state("holding", static_cast<std::uint32_t>(debug_state_task_index_spin_->value()));
+    });
+    connect(debug_state_carry_holding_button_, &QPushButton::clicked, this, [this]() {
+      node_->send_debug_state("carry_holding", static_cast<std::uint32_t>(debug_state_task_index_spin_->value()));
     });
 
     connect(add_task_point_button_, &QPushButton::clicked, this, [this]() {
@@ -1290,6 +1415,7 @@ private:
       }
       task_index_spin_->setValue(selected_task_point_id_);
       point_id_spin_->setValue(selected_task_point_id_);
+      debug_state_task_index_spin_->setValue(selected_task_point_id_);
       mission_x_spin_->setValue(table_double(row, 1, 0.0));
       mission_y_spin_->setValue(table_double(row, 2, 0.0));
       return;
@@ -1305,24 +1431,29 @@ private:
       QSignalBlocker block_y(pose_y_spin_);
       QSignalBlocker block_yaw(pose_yaw_deg_spin_);
       QSignalBlocker block_hz(pose_publish_hz_spin_);
+      QSignalBlocker block_mock(mock_nav_publish_check_);
       QSignalBlocker block_auto(auto_publish_check_);
       pose_x_spin_->setValue(snapshot.pose_x);
       pose_y_spin_->setValue(snapshot.pose_y);
       pose_yaw_deg_spin_->setValue(snapshot.pose_yaw_rad * kRadToDeg);
       pose_publish_hz_spin_->setValue(snapshot.pose_publish_hz);
+      mock_nav_publish_check_->setChecked(snapshot.mock_nav_publish_enabled);
       auto_publish_check_->setChecked(snapshot.pose_auto_publish);
       ui_pose_synced_once_ = true;
     }
 
     const QString status = QStringLiteral(
-      "mission_service=%1 | pose=%2 | points=%3 | arm_event_response=%4")
+      "mission_service=%1 | debug_state=%2 | mock_pub=%3 | pose=%4 | points=%5 | arm_event_response=%6")
       .arg(snapshot.mission_service_ready ? QStringLiteral("up") : QStringLiteral("down"))
+      .arg(snapshot.debug_state_service_ready ? QStringLiteral("up") : QStringLiteral("down"))
+      .arg(snapshot.mock_nav_publish_enabled ? QStringLiteral("on") : QStringLiteral("off"))
       .arg(QString::fromStdString(format_pose(snapshot.pose_x, snapshot.pose_y, snapshot.pose_yaw_rad)))
       .arg(snapshot.task_points.size())
       .arg(snapshot.arm_event_response_success ? QStringLiteral("success") : QStringLiteral("fail"));
     status_label_->setText(status);
 
     mission_status_label_->setText(QString::fromStdString(snapshot.last_mission_call_status));
+    debug_state_status_label_->setText(QString::fromStdString(snapshot.last_debug_state_call_status));
 
     last_arm_event_request_label_->setText(
       snapshot.has_last_arm_event_request ?
@@ -1390,6 +1521,7 @@ private:
   QDoubleSpinBox * pose_y_spin_{nullptr};
   QDoubleSpinBox * pose_yaw_deg_spin_{nullptr};
   QDoubleSpinBox * pose_publish_hz_spin_{nullptr};
+  QCheckBox * mock_nav_publish_check_{nullptr};
   QCheckBox * auto_publish_check_{nullptr};
   QPushButton * publish_pose_button_{nullptr};
   QLabel * pose_note_label_{nullptr};
@@ -1401,6 +1533,13 @@ private:
   QPushButton * use_selected_button_{nullptr};
   QPushButton * send_mission_button_{nullptr};
   QLabel * mission_status_label_{nullptr};
+  QSpinBox * debug_state_task_index_spin_{nullptr};
+  QPushButton * debug_state_use_selected_button_{nullptr};
+  QPushButton * debug_state_idle_button_{nullptr};
+  QPushButton * debug_state_lookout_button_{nullptr};
+  QPushButton * debug_state_holding_button_{nullptr};
+  QPushButton * debug_state_carry_holding_button_{nullptr};
+  QLabel * debug_state_status_label_{nullptr};
   QCheckBox * arm_event_success_check_{nullptr};
   QLineEdit * arm_event_message_edit_{nullptr};
   QLabel * last_arm_event_request_label_{nullptr};

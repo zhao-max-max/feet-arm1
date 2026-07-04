@@ -8,6 +8,7 @@
 #include "rclcpp/rclcpp.hpp"
 #include "robot_msgs/srv/get_pick_pos.hpp"
 #include "robot_msgs/srv/get_place_pos.hpp"
+#include "std_msgs/msg/string.hpp"
 #include "tf2_ros/buffer.h"
 
 namespace arm2_task::task
@@ -46,6 +47,7 @@ private:
   rclcpp::Client<robot_msgs::srv::GetPickPos>::SharedPtr pick_client_;
   rclcpp::Client<robot_msgs::srv::GetPlacePos>::SharedPtr place_client_;
   rclcpp::Client<robot_msgs::srv::GetPlacePos>::SharedPtr stack_client_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr timing_event_pub_;
 };
 
 }  // namespace arm2_task::task

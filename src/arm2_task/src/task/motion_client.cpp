@@ -1,7 +1,10 @@
 #include "arm2_task/task/motion_client.hpp"
 
 #include <future>
+#include <sstream>
 #include <utility>
+
+#include "arm2_task/task/timing_events.hpp"
 
 using namespace std::chrono_literals;
 
@@ -18,6 +21,7 @@ MotionClient::MotionClient(
   mode_client_(std::move(mode_client)),
   is_running_(is_running)
 {
+  timing_event_pub_ = create_timing_event_publisher(node_);
 }
 
 void MotionClient::set_trajectory_defaults(
@@ -37,6 +41,15 @@ bool MotionClient::task_is_running() const
 
 bool MotionClient::send_move_goal(const std::vector<Eigen::VectorXd> & q_waypoints)
 {
+  active_move_goal_sequence_ = ++move_goal_sequence_;
+  std::ostringstream detail;
+  detail << "seq=" << active_move_goal_sequence_
+         << ",points=" << q_waypoints.size()
+         << ",max_v=" << max_v_
+         << ",max_a=" << max_a_
+         << ",blend_radius=" << blend_radius_;
+  publish_timing_event(node_, timing_event_pub_, "motion", "move_joint", "begin", detail.str());
+
   if (!move_joint_client_->wait_for_action_server(10s)) {
     is_action_running_ = false;
     action_finished_ = true;
@@ -46,6 +59,9 @@ bool MotionClient::send_move_goal(const std::vector<Eigen::VectorXd> & q_waypoin
       last_action_message_ = "move_joint action server not available.";
     }
     RCLCPP_ERROR(node_->get_logger(), "move_joint action server not available.");
+    publish_timing_event(
+      node_, timing_event_pub_, "motion", "move_joint", "end",
+      detail.str() + ",ok=0,reason=action_server_unavailable");
     return false;
   }
 
@@ -122,6 +138,7 @@ bool MotionClient::send_move_goal(const Eigen::VectorXd & q_single)
 
 bool MotionClient::wait_for_action_completion(std::chrono::seconds timeout)
 {
+  const int seq = active_move_goal_sequence_;
   const auto deadline = std::chrono::steady_clock::now() + timeout;
   while (rclcpp::ok() && task_is_running() && !action_finished_) {
     if (std::chrono::steady_clock::now() >= deadline) {
@@ -134,6 +151,9 @@ bool MotionClient::wait_for_action_completion(std::chrono::seconds timeout)
       RCLCPP_ERROR(
         node_->get_logger(),
         "Timed out waiting for move_joint action after %lds.", timeout.count());
+      publish_timing_event(
+        node_, timing_event_pub_, "motion", "move_joint", "end",
+        "seq=" + std::to_string(seq) + ",ok=0,reason=timeout");
       return false;
     }
     rclcpp::sleep_for(50ms);
@@ -143,6 +163,9 @@ bool MotionClient::wait_for_action_completion(std::chrono::seconds timeout)
     std::lock_guard<std::mutex> lock(action_result_mutex_);
     last_action_succeeded_ = false;
     last_action_message_ = "Task loop stopped before action finished.";
+    publish_timing_event(
+      node_, timing_event_pub_, "motion", "move_joint", "end",
+      "seq=" + std::to_string(seq) + ",ok=0,reason=task_stopped");
     return false;
   }
 
@@ -159,13 +182,22 @@ bool MotionClient::wait_for_action_completion(std::chrono::seconds timeout)
       node_->get_logger(), "move_joint action reported failure: %s",
       msg.empty() ? "unknown error" : msg.c_str());
   }
+  publish_timing_event(
+    node_, timing_event_pub_, "motion", "move_joint", "end",
+    "seq=" + std::to_string(seq) + ",ok=" + timing_bool(rclcpp::ok() && succeeded) +
+    ",message=" + (msg.empty() ? "none" : msg));
   return rclcpp::ok() && succeeded;
 }
 
 int MotionClient::request_mode_switch(const std::string & mode_name)
 {
+  const std::string detail = "mode=" + mode_name;
+  publish_timing_event(node_, timing_event_pub_, "service", "set_controller_mode", "begin", detail);
   if (!mode_client_->wait_for_service(1s)) {
     RCLCPP_ERROR(node_->get_logger(), "Mode switch service not available");
+    publish_timing_event(
+      node_, timing_event_pub_, "service", "set_controller_mode", "end",
+      detail + ",ok=0,reason=service_unavailable");
     return 0;
   }
 
@@ -175,18 +207,26 @@ int MotionClient::request_mode_switch(const std::string & mode_name)
   auto result_future = mode_client_->async_send_request(request);
   if (result_future.wait_for(2s) != std::future_status::ready) {
     RCLCPP_ERROR(node_->get_logger(), "Mode switch to [%s] timed out.", mode_name.c_str());
+    publish_timing_event(
+      node_, timing_event_pub_, "service", "set_controller_mode", "end",
+      detail + ",ok=0,reason=timeout");
     return 0;
   }
 
   const auto response = result_future.get();
   if (!response || !response->success) {
     RCLCPP_ERROR(node_->get_logger(), "Mode switch to [%s] failed.", mode_name.c_str());
+    publish_timing_event(
+      node_, timing_event_pub_, "service", "set_controller_mode", "end",
+      detail + ",ok=0,reason=response_failure");
     return 0;
   }
 
   RCLCPP_INFO(
     node_->get_logger(),
     "\033[1;36m[Mode]\033[0m Controller switched to: %s", mode_name.c_str());
+  publish_timing_event(
+    node_, timing_event_pub_, "service", "set_controller_mode", "end", detail + ",ok=1");
   return 1;
 }
 

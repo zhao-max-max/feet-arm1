@@ -20,6 +20,11 @@ def generate_launch_description():
         default_value="/arm/mission_event",
         description="Mission service provided by arm task_node",
     )
+    arm_debug_state_service_arg = DeclareLaunchArgument(
+        "arm_debug_state_service",
+        default_value="/arm/debug_state_command",
+        description="Debug state service provided by arm task_node",
+    )
     nav_arm_event_service_arg = DeclareLaunchArgument(
         "nav_arm_event_service",
         default_value="/navigation/arm_event",
@@ -55,6 +60,11 @@ def generate_launch_description():
         default_value="true",
         description="Whether to auto-publish the mock lidar pose",
     )
+    mock_nav_publish_enabled_arg = DeclareLaunchArgument(
+        "mock_nav_publish_enabled",
+        default_value="true",
+        description="Whether this UI publishes mock /navigation/state and /navigation/task_points",
+    )
     pose_publish_hz_arg = DeclareLaunchArgument(
         "pose_publish_hz",
         default_value="10.0",
@@ -72,6 +82,7 @@ def generate_launch_description():
                 "nav_state_topic": LaunchConfiguration("nav_state_topic"),
                 "nav_task_points_topic": LaunchConfiguration("nav_task_points_topic"),
                 "arm_mission_service": LaunchConfiguration("arm_mission_service"),
+                "arm_debug_state_service": LaunchConfiguration("arm_debug_state_service"),
                 "nav_arm_event_service": LaunchConfiguration("nav_arm_event_service"),
                 "nav_mission_request_topic": LaunchConfiguration("nav_mission_request_topic"),
                 "nav_mission_response_topic": LaunchConfiguration("nav_mission_response_topic"),
@@ -79,6 +90,7 @@ def generate_launch_description():
                 "nav_arm_event_response_topic": LaunchConfiguration("nav_arm_event_response_topic"),
                 "target_pose_topic": LaunchConfiguration("target_pose_topic"),
                 "pose_auto_publish": LaunchConfiguration("pose_auto_publish"),
+                "mock_nav_publish_enabled": LaunchConfiguration("mock_nav_publish_enabled"),
                 "pose_publish_hz": LaunchConfiguration("pose_publish_hz"),
             }
         ],
@@ -89,6 +101,7 @@ def generate_launch_description():
             nav_state_topic_arg,
             nav_task_points_topic_arg,
             arm_mission_service_arg,
+            arm_debug_state_service_arg,
             nav_arm_event_service_arg,
             nav_mission_request_topic_arg,
             nav_mission_response_topic_arg,
@@ -96,6 +109,7 @@ def generate_launch_description():
             nav_arm_event_response_topic_arg,
             target_pose_topic_arg,
             pose_auto_publish_arg,
+            mock_nav_publish_enabled_arg,
             pose_publish_hz_arg,
             nav_mock_ui,
         ]

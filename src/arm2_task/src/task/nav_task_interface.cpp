@@ -2,7 +2,9 @@
 
 #include <chrono>
 #include <cmath>
+#include <sstream>
 
+#include "arm2_task/task/timing_events.hpp"
 #include "geometry_msgs/msg/pose.hpp"
 
 using namespace std::chrono_literals;
@@ -35,6 +37,7 @@ NavTaskInterface::NavTaskInterface(
   nav_event_response_debug_pub_ =
     node_->create_publisher<navigation::srv::StringCommand::Response>(
     "/debug/nav/arm_event_response", debug_qos);
+  timing_event_pub_ = create_timing_event_publisher(node_);
 
   arm_mission_server_ = node_->create_service<navigation::srv::MissionCommand>(
     "/arm/mission_event",
@@ -138,12 +141,51 @@ NavTaskInterface::NavTaskInterface(
       cmd_cv_.notify_one();
     });
 
+  debug_state_server_ = node_->create_service<navigation::srv::MissionCommand>(
+    "/arm/debug_state_command",
+    [this](
+      const navigation::srv::MissionCommand::Request::SharedPtr request,
+      navigation::srv::MissionCommand::Response::SharedPtr response)
+    {
+      if (!request) {
+        response->success = false;
+        response->message = "null debug state request";
+        return;
+      }
+
+      if (remote_busy_.exchange(true)) {
+        response->success = false;
+        response->message = "arm busy";
+        RCLCPP_WARN(
+          node_->get_logger(),
+          "[debug_state] Rejected %s task_index=%u: arm busy.",
+          request->action.c_str(), request->task_index);
+        return;
+      }
+
+      const std::string timing_detail =
+        "action=" + request->action + ",task_index=" + std::to_string(request->task_index) +
+        ",point_id=" + std::to_string(request->point_id);
+      publish_timing_event(
+        node_, timing_event_pub_, "debug", "debug_state_command", "begin", timing_detail);
+      const bool ok = handle_debug_state_command(*request, response.get());
+      publish_timing_event(
+        node_, timing_event_pub_, "debug", "debug_state_command", "end",
+        timing_detail + ",ok=" + timing_bool(ok) + ",message=" + response->message);
+      remote_busy_.store(false);
+      RCLCPP_INFO(
+        node_->get_logger(),
+        "[debug_state] %s task_index=%u -> %s: %s",
+        request->action.c_str(), request->task_index,
+        ok ? "ok" : "fail", response->message.c_str());
+    });
+
   nav_event_client_ = node_->create_client<navigation::srv::StringCommand>(
     "/navigation/arm_event");
 
   RCLCPP_INFO(
     node_->get_logger(),
-    "Nav integration ready: /arm/mission_event MissionCommand server + /navigation/arm_event client.");
+    "Nav integration ready: /arm/mission_event + /arm/debug_state_command servers, /navigation/arm_event client.");
 }
 
 void NavTaskInterface::publish_mission_request_debug(
@@ -176,6 +218,42 @@ void NavTaskInterface::publish_nav_event_response_debug(
   if (nav_event_response_debug_pub_) {
     nav_event_response_debug_pub_->publish(response);
   }
+}
+
+const char * NavTaskInterface::task_state_name(arm2_task::TaskState state) const
+{
+  switch (state) {
+    case arm2_task::TaskState::IDLE:
+      return "IDLE";
+    case arm2_task::TaskState::LOOKOUT:
+      return "LOOKOUT";
+    case arm2_task::TaskState::OVERLOOK:
+      return "OVERLOOK";
+    case arm2_task::TaskState::GRASPING:
+      return "GRASPING";
+    case arm2_task::TaskState::HOLDING:
+      return "HOLDING";
+    case arm2_task::TaskState::PLACING:
+      return "PLACING";
+    case arm2_task::TaskState::FAULT:
+      return "FAULT";
+  }
+  return "UNKNOWN";
+}
+
+void NavTaskInterface::set_task_state(
+  arm2_task::TaskState next_state,
+  const std::string & reason)
+{
+  const auto previous_state = state_;
+  state_ = next_state;
+
+  std::ostringstream detail;
+  detail << "from=" << task_state_name(previous_state)
+         << ",to=" << task_state_name(next_state)
+         << ",reason=" << reason;
+  publish_timing_event(
+    node_, timing_event_pub_, "state", "task_state", "instant", detail.str());
 }
 
 void NavTaskInterface::log_nav_pose_snapshot(const char * context)
@@ -295,6 +373,10 @@ bool NavTaskInterface::compute_command_relative_pose(
 
 void NavTaskInterface::send_nav_event(const std::string & event)
 {
+  const std::string timing_detail = "event=" + event;
+  publish_timing_event(
+    node_, timing_event_pub_, "service", "navigation_arm_event", "begin", timing_detail);
+
   navigation::srv::StringCommand::Request req_msg;
   req_msg.message = event;
   publish_nav_event_request_debug(req_msg);
@@ -308,6 +390,9 @@ void NavTaskInterface::send_nav_event(const std::string & event)
       node_->get_logger(),
       "[nav] /navigation/arm_event service unavailable, dropping event: %s",
       event.c_str());
+    publish_timing_event(
+      node_, timing_event_pub_, "service", "navigation_arm_event", "end",
+      timing_detail + ",ok=0,reason=service_unavailable");
     return;
   }
 
@@ -320,6 +405,9 @@ void NavTaskInterface::send_nav_event(const std::string & event)
     debug_resp.message = "timed out";
     publish_nav_event_response_debug(debug_resp);
     RCLCPP_WARN(node_->get_logger(), "[nav] arm_event \"%s\" timed out.", event.c_str());
+    publish_timing_event(
+      node_, timing_event_pub_, "service", "navigation_arm_event", "end",
+      timing_detail + ",ok=0,reason=timeout");
     return;
   }
 
@@ -330,6 +418,9 @@ void NavTaskInterface::send_nav_event(const std::string & event)
     debug_resp.message = "null response";
     publish_nav_event_response_debug(debug_resp);
     RCLCPP_WARN(node_->get_logger(), "[nav] arm_event \"%s\" returned null response.", event.c_str());
+    publish_timing_event(
+      node_, timing_event_pub_, "service", "navigation_arm_event", "end",
+      timing_detail + ",ok=0,reason=null_response");
     return;
   }
 
@@ -341,16 +432,29 @@ void NavTaskInterface::send_nav_event(const std::string & event)
       node_->get_logger(), "[nav] arm_event \"%s\" rejected: %s",
       event.c_str(), resp->message.c_str());
   }
+  publish_timing_event(
+    node_, timing_event_pub_, "service", "navigation_arm_event", "end",
+    timing_detail + ",ok=" + timing_bool(resp->success) + ",message=" + resp->message);
 }
 
 bool NavTaskInterface::do_grasp_sequence(const MissionCommand & command)
 {
+  std::ostringstream detail;
+  detail << "task_index=" << command.task_index << ",point_id=" << command.point_id;
+  publish_timing_event(node_, timing_event_pub_, "mission", "pickup_sequence", "begin", detail.str());
+
   if (!do_pickup_lookout_align(command)) {
+    publish_timing_event(
+      node_, timing_event_pub_, "mission", "pickup_sequence", "end",
+      detail.str() + ",ok=0,reason=lookout_align_failed");
     return false;
   }
   clear_active_ready_command();
 
   if (!sequences_->grasp_from_current_view()) {
+    publish_timing_event(
+      node_, timing_event_pub_, "mission", "pickup_sequence", "end",
+      detail.str() + ",ok=0,reason=grasp_failed");
     return false;
   }
 
@@ -358,10 +462,74 @@ bool NavTaskInterface::do_grasp_sequence(const MissionCommand & command)
   send_nav_event("grabbed");
 
   if (!sequences_->move_to_carry_loaded()) {
+    publish_timing_event(
+      node_, timing_event_pub_, "mission", "pickup_sequence", "end",
+      detail.str() + ",ok=0,reason=carry_move_failed");
     return false;
   }
 
   send_nav_event("completed");
+  publish_timing_event(
+    node_, timing_event_pub_, "mission", "pickup_sequence", "end",
+    detail.str() + ",ok=1");
+  return true;
+}
+
+bool NavTaskInterface::do_lookout_align_for_command(
+  const MissionCommand & command,
+  const char * context)
+{
+  std::ostringstream detail;
+  detail << "context=" << context
+         << ",task_index=" << command.task_index
+         << ",point_id=" << command.point_id;
+  publish_timing_event(
+    node_, timing_event_pub_, "action", "nav_lookout_align", "begin", detail.str());
+
+  arm2_task::task::RelativePlanarPose relative_pose;
+  if (!compute_command_relative_pose(command, &relative_pose)) {
+    RCLCPP_ERROR(
+      node_->get_logger(),
+      "[nav] %s lookout failed: unable to compute radar-relative target pose for task_index=%u.",
+      context, command.task_index);
+    publish_timing_event(
+      node_, timing_event_pub_, "action", "nav_lookout_align", "end",
+      detail.str() + ",ok=0,reason=relative_pose_failed");
+    return false;
+  }
+
+  geometry_msgs::msg::Pose look_target;
+  look_target.position.x = relative_pose.x;
+  look_target.position.y = relative_pose.y;
+  look_target.position.z = 0.0;
+  look_target.orientation.w = 1.0;
+
+  const double lookout_yaw = std::atan2(relative_pose.y, relative_pose.x);
+  RCLCPP_INFO(
+    node_->get_logger(),
+    "[nav] %s lookout task_index=%u target_id=%d arm=(x=%.3f, y=%.3f), joint0_yaw=%.3f rad (%.1f deg).",
+    context,
+    command.task_index,
+    relative_pose.task_pose.id,
+    relative_pose.x,
+    relative_pose.y,
+    lookout_yaw,
+    lookout_yaw * 180.0 / M_PI);
+
+  if (!primitives_->do_look_out(look_target)) {
+    RCLCPP_ERROR(node_->get_logger(), "[nav] %s lookout move failed.", context);
+    publish_timing_event(
+      node_, timing_event_pub_, "action", "nav_lookout_align", "end",
+      detail.str() + ",ok=0,reason=lookout_move_failed");
+    return false;
+  }
+  set_task_state(arm2_task::TaskState::LOOKOUT, std::string(context) + "_lookout_align");
+  publish_timing_event(
+    node_, timing_event_pub_, "action", "nav_lookout_align", "end",
+    detail.str() + ",ok=1,target_id=" + std::to_string(relative_pose.task_pose.id) +
+    ",rel_x=" + std::to_string(relative_pose.x) +
+    ",rel_y=" + std::to_string(relative_pose.y) +
+    ",yaw=" + std::to_string(lookout_yaw));
   return true;
 }
 
@@ -394,53 +562,102 @@ bool NavTaskInterface::do_pickup_lookout_align(const MissionCommand & command)
       command.task_index);
   }
 
-  arm2_task::task::RelativePlanarPose relative_pose;
-  if (!compute_command_relative_pose(lookout_command, &relative_pose)) {
-    RCLCPP_ERROR(
-      node_->get_logger(),
-      "[nav] Pickup lookout failed: unable to compute radar-relative target pose for task_index=%u.",
-      lookout_command.task_index);
+  return do_lookout_align_for_command(lookout_command, "Pickup");
+}
+
+bool NavTaskInterface::handle_debug_state_command(
+  const navigation::srv::MissionCommand::Request & request,
+  navigation::srv::MissionCommand::Response * response)
+{
+  if (response == nullptr) {
     return false;
   }
 
-  geometry_msgs::msg::Pose look_target;
-  look_target.position.x = relative_pose.x;
-  look_target.position.y = relative_pose.y;
-  look_target.position.z = 0.0;
-  look_target.orientation.w = 1.0;
+  MissionCommand command;
+  command.task_index = request.task_index;
+  command.point_id = request.point_id;
+  command.action = request.action;
+  command.x = request.x;
+  command.y = request.y;
 
-  const double lookout_yaw = std::atan2(relative_pose.y, relative_pose.x);
-  RCLCPP_INFO(
-    node_->get_logger(),
-    "[nav] Pickup lookout task_index=%u target_id=%d arm=(x=%.3f, y=%.3f), joint0_yaw=%.3f rad (%.1f deg).",
-    lookout_command.task_index,
-    relative_pose.task_pose.id,
-    relative_pose.x,
-    relative_pose.y,
-    lookout_yaw,
-    lookout_yaw * 180.0 / M_PI);
-
-  if (!primitives_->do_look_out(look_target)) {
-    RCLCPP_ERROR(node_->get_logger(), "[nav] Pickup lookout move failed.");
-    return false;
+  if (command.action == "idle") {
+    clear_active_ready_command();
+    set_task_state(arm2_task::TaskState::IDLE, "debug_idle");
+    response->success = true;
+    response->message = "state set to IDLE; arm motion unchanged";
+    return true;
   }
-  state_ = arm2_task::TaskState::LOOKOUT;
-  return true;
+
+  if (command.action == "holding") {
+    clear_active_ready_command();
+    set_task_state(arm2_task::TaskState::HOLDING, "debug_holding");
+    response->success = true;
+    response->message = "state set to HOLDING; arm motion unchanged";
+    return true;
+  }
+
+  if (command.action == "carry_holding") {
+    clear_active_ready_command();
+    if (!sequences_->move_to_carry_loaded()) {
+      response->success = false;
+      response->message = "failed to move to carry loaded";
+      return false;
+    }
+    set_task_state(arm2_task::TaskState::HOLDING, "debug_carry_holding");
+    response->success = true;
+    response->message = "moved to carry and set HOLDING";
+    return true;
+  }
+
+  if (command.action == "lookout") {
+    if (command.task_index == 0) {
+      const auto ready_command = active_ready_command_copy();
+      if (!ready_command.has_value()) {
+        response->success = false;
+        response->message = "lookout requires task_index or cached ready target";
+        return false;
+      }
+      command = *ready_command;
+      command.action = "lookout";
+    }
+
+    if (!do_lookout_align_for_command(command, "Debug")) {
+      response->success = false;
+      response->message = "lookout align failed";
+      return false;
+    }
+    response->success = true;
+    response->message = "state set to LOOKOUT";
+    return true;
+  }
+
+  response->success = false;
+  response->message = "invalid debug action; expected idle/lookout/holding/carry_holding";
+  return false;
 }
 
 bool NavTaskInterface::do_ready_sequence(const MissionCommand & command)
 {
+  std::ostringstream detail;
+  detail << "task_index=" << command.task_index << ",point_id=" << command.point_id;
+  publish_timing_event(node_, timing_event_pub_, "mission", "ready_sequence", "begin", detail.str());
   RCLCPP_INFO(
     node_->get_logger(),
     "[nav] Ready cached for task_index=%u point_id=%d. Arm will keep current posture until pickup.",
     command.task_index, command.point_id);
   cache_active_ready_command(command);
+  publish_timing_event(
+    node_, timing_event_pub_, "mission", "ready_sequence", "end", detail.str() + ",ok=1");
   return true;
 }
 
 bool NavTaskInterface::do_place_sequence()
 {
+  publish_timing_event(node_, timing_event_pub_, "mission", "place_sequence", "begin");
   if (!sequences_->place_from_perception()) {
+    publish_timing_event(
+      node_, timing_event_pub_, "mission", "place_sequence", "end",
+      "ok=0,reason=place_failed");
     return false;
   }
 
@@ -448,12 +665,18 @@ bool NavTaskInterface::do_place_sequence()
   send_nav_event("placed");
   primitives_->do_reset();
   send_nav_event("completed");
+  publish_timing_event(node_, timing_event_pub_, "mission", "place_sequence", "end", "ok=1");
   return true;
 }
 
 bool NavTaskInterface::execute_mission_command(const MissionCommand & command)
 {
   log_mission_command(command);
+  std::ostringstream detail;
+  detail << "action=" << command.action
+         << ",task_index=" << command.task_index
+         << ",point_id=" << command.point_id;
+  publish_timing_event(node_, timing_event_pub_, "mission", "execute_command", "begin", detail.str());
 
   if (command.action == "ready") {
     clear_active_ready_command();
@@ -462,11 +685,18 @@ bool NavTaskInterface::execute_mission_command(const MissionCommand & command)
         node_->get_logger(),
         "[nav] Ready command ignored because arm state is %d, expected IDLE/LOOKOUT.",
         static_cast<int>(state_));
+      publish_timing_event(
+        node_, timing_event_pub_, "mission", "execute_command", "end",
+        detail.str() + ",ok=0,reason=invalid_state");
       return false;
     }
 
     RCLCPP_INFO(node_->get_logger(), "[nav] Caching ready target without arm motion...");
-    return do_ready_sequence(command);
+    const bool ok = do_ready_sequence(command);
+    publish_timing_event(
+      node_, timing_event_pub_, "mission", "execute_command", "end",
+      detail.str() + ",ok=" + timing_bool(ok));
+    return ok;
   }
 
   if (command.action == "pickup") {
@@ -475,14 +705,23 @@ bool NavTaskInterface::execute_mission_command(const MissionCommand & command)
         node_->get_logger(),
         "[nav] Pickup command ignored because arm state is %d, expected IDLE/LOOKOUT.",
         static_cast<int>(state_));
+      publish_timing_event(
+        node_, timing_event_pub_, "mission", "execute_command", "end",
+        detail.str() + ",ok=0,reason=invalid_state");
       return false;
     }
 
     RCLCPP_INFO(node_->get_logger(), "[nav] Executing pickup sequence...");
     if (do_grasp_sequence(command)) {
-      state_ = arm2_task::TaskState::HOLDING;
+      set_task_state(arm2_task::TaskState::HOLDING, "pickup_complete");
+      publish_timing_event(
+        node_, timing_event_pub_, "mission", "execute_command", "end",
+        detail.str() + ",ok=1");
       return true;
     }
+    publish_timing_event(
+      node_, timing_event_pub_, "mission", "execute_command", "end",
+      detail.str() + ",ok=0,reason=pickup_sequence_failed");
     return false;
   }
 
@@ -493,18 +732,30 @@ bool NavTaskInterface::execute_mission_command(const MissionCommand & command)
         node_->get_logger(),
         "[nav] Place command ignored because arm state is %d, expected HOLDING.",
         static_cast<int>(state_));
+      publish_timing_event(
+        node_, timing_event_pub_, "mission", "execute_command", "end",
+        detail.str() + ",ok=0,reason=invalid_state");
       return false;
     }
 
     RCLCPP_INFO(node_->get_logger(), "[nav] Executing place sequence...");
     if (do_place_sequence()) {
-      state_ = arm2_task::TaskState::IDLE;
+      set_task_state(arm2_task::TaskState::IDLE, "place_complete");
+      publish_timing_event(
+        node_, timing_event_pub_, "mission", "execute_command", "end",
+        detail.str() + ",ok=1");
       return true;
     }
+    publish_timing_event(
+      node_, timing_event_pub_, "mission", "execute_command", "end",
+      detail.str() + ",ok=0,reason=place_sequence_failed");
     return false;
   }
 
   RCLCPP_WARN(node_->get_logger(), "[nav] Unknown mission action: %s", command.action.c_str());
+  publish_timing_event(
+    node_, timing_event_pub_, "mission", "execute_command", "end",
+    detail.str() + ",ok=0,reason=unknown_action");
   return false;
 }
 

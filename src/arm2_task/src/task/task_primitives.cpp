@@ -2,9 +2,11 @@
 
 #include <algorithm>
 #include <cmath>
+#include <sstream>
 #include <utility>
 
 #include "arm2_task/task/pose_utils.hpp"
+#include "arm2_task/task/timing_events.hpp"
 
 using namespace std::chrono_literals;
 
@@ -37,6 +39,7 @@ TaskPrimitives::TaskPrimitives(
   is_running_(is_running),
   config_(std::move(config))
 {
+  timing_event_pub_ = create_timing_event_publisher(node_);
 }
 
 bool TaskPrimitives::task_is_running() const
@@ -167,52 +170,90 @@ void TaskPrimitives::wait_joints_still(double dq_threshold, int timeout_ms)
 
 void TaskPrimitives::do_reset()
 {
+  publish_timing_event(node_, timing_event_pub_, "action", "reset", "begin");
   RCLCPP_INFO(node_->get_logger(), "[reset] suction OFF -> moving -> reset -> moving");
   set_suction(false);
   if (!request_mode_switch("moving")) {
+    publish_timing_event(
+      node_, timing_event_pub_, "action", "reset", "end", "ok=0,reason=mode_moving_failed");
     return;
   }
   if (!presets_->count("reset")) {
     RCLCPP_ERROR(node_->get_logger(), "Preset 'reset' not found!");
+    publish_timing_event(
+      node_, timing_event_pub_, "action", "reset", "end", "ok=0,reason=missing_preset");
     return;
   }
+  bool ok = true;
   if (send_move_goal({presets_->at("reset")})) {
-    wait_for_action_completion();
+    ok = wait_for_action_completion();
+  } else {
+    ok = false;
   }
   request_mode_switch("moving");
+  publish_timing_event(
+    node_, timing_event_pub_, "action", "reset", "end", std::string("ok=") + timing_bool(ok));
 }
 
 void TaskPrimitives::do_reset_suction()
 {
+  publish_timing_event(node_, timing_event_pub_, "action", "reset_suction", "begin");
   RCLCPP_INFO(node_->get_logger(), "[reset_suction] moving -> reset -> idle");
   if (!request_mode_switch("moving")) {
+    publish_timing_event(
+      node_, timing_event_pub_, "action", "reset_suction", "end",
+      "ok=0,reason=mode_moving_failed");
     return;
   }
   if (!presets_->count("reset")) {
     RCLCPP_ERROR(node_->get_logger(), "Preset 'reset' not found!");
+    publish_timing_event(
+      node_, timing_event_pub_, "action", "reset_suction", "end",
+      "ok=0,reason=missing_preset");
     return;
   }
+  bool ok = true;
   if (send_move_goal({presets_->at("reset")})) {
-    wait_for_action_completion();
+    ok = wait_for_action_completion();
+  } else {
+    ok = false;
   }
   request_mode_switch("idle");
+  publish_timing_event(
+    node_, timing_event_pub_, "action", "reset_suction", "end",
+    std::string("ok=") + timing_bool(ok));
 }
 
 void TaskPrimitives::do_load()
 {
+  publish_timing_event(node_, timing_event_pub_, "action", "load", "begin");
   if (!presets_->count("load")) {
     RCLCPP_ERROR(node_->get_logger(), "Preset 'load' not found!");
+    publish_timing_event(
+      node_, timing_event_pub_, "action", "load", "end", "ok=0,reason=missing_preset");
     return;
   }
+  bool ok = true;
   if (send_move_goal({presets_->at("load")})) {
-    wait_for_action_completion();
+    ok = wait_for_action_completion();
+  } else {
+    ok = false;
   }
+  publish_timing_event(
+    node_, timing_event_pub_, "action", "load", "end", std::string("ok=") + timing_bool(ok));
 }
 
 bool TaskPrimitives::do_look_out(const geometry_msgs::msg::Pose & target)
 {
+  std::ostringstream detail;
+  detail << "target_x=" << target.position.x << ",target_y=" << target.position.y;
+  publish_timing_event(node_, timing_event_pub_, "action", "look_out", "begin", detail.str());
+
   if (!presets_->count("look_out")) {
     RCLCPP_ERROR(node_->get_logger(), "Preset 'look_out' not found!");
+    publish_timing_event(
+      node_, timing_event_pub_, "action", "look_out", "end",
+      detail.str() + ",ok=0,reason=missing_preset");
     return false;
   }
   RCLCPP_INFO(
@@ -222,32 +263,56 @@ bool TaskPrimitives::do_look_out(const geometry_msgs::msg::Pose & target)
   auto goal_q = presets_->at("look_out");
   goal_q[0] = std::atan2(target.position.y, target.position.x);
   goal_q[4] = 0.0;
+  detail << ",yaw=" << goal_q[0];
+  bool ok = false;
   if (send_move_goal({goal_q})) {
-    return wait_for_action_completion();
+    ok = wait_for_action_completion();
   }
-  return false;
+  publish_timing_event(
+    node_, timing_event_pub_, "action", "look_out", "end",
+    detail.str() + ",ok=" + timing_bool(ok));
+  return ok;
 }
 
 void TaskPrimitives::do_suction_on()
 {
+  publish_timing_event(node_, timing_event_pub_, "action", "suction_on", "begin");
   RCLCPP_INFO(node_->get_logger(), "[suction] waiting 400ms for arm to settle...");
   rclcpp::sleep_for(400ms);
-  set_suction(true);
+  const bool suction_ok = set_suction(true) != 0;
   rclcpp::sleep_for(500ms);
-  request_mode_switch("loaded");
+  const bool mode_ok = request_mode_switch("loaded") != 0;
+  publish_timing_event(
+    node_, timing_event_pub_, "action", "suction_on", "end",
+    std::string("ok=") + timing_bool(suction_ok && mode_ok) +
+    ",suction_ok=" + timing_bool(suction_ok) +
+    ",mode_ok=" + timing_bool(mode_ok));
 }
 
 void TaskPrimitives::do_suction_off()
 {
+  publish_timing_event(node_, timing_event_pub_, "action", "suction_off", "begin");
   RCLCPP_INFO(node_->get_logger(), "[suction] OFF -> mode=moving");
-  set_suction(false);
-  request_mode_switch("moving");
+  const bool suction_ok = set_suction(false) != 0;
+  const bool mode_ok = request_mode_switch("moving") != 0;
+  publish_timing_event(
+    node_, timing_event_pub_, "action", "suction_off", "end",
+    std::string("ok=") + timing_bool(suction_ok && mode_ok) +
+    ",suction_ok=" + timing_bool(suction_ok) +
+    ",mode_ok=" + timing_bool(mode_ok));
 }
 
 bool TaskPrimitives::do_grasp_move(
   const geometry_msgs::msg::Pose & target,
   double tool_roll)
 {
+  std::ostringstream detail;
+  detail << "target_x=" << target.position.x
+         << ",target_y=" << target.position.y
+         << ",target_z=" << target.position.z
+         << ",tool_roll=" << tool_roll;
+  publish_timing_event(node_, timing_event_pub_, "action", "grasp_move", "begin", detail.str());
+
   const double pitch = config_.grasp_pitch + config_.tool_pitch_offset;
   const double q0 = std::atan2(target.position.y, target.position.x);
   const double cos_q0 = std::cos(q0);
@@ -271,6 +336,9 @@ bool TaskPrimitives::do_grasp_move(
       node_->get_logger(),
       "[grasp_move] IK failed for pre-grasp (%.3f, %.3f, %.3f)",
       pre_target.x(), pre_target.y(), pre_target.z());
+    publish_timing_event(
+      node_, timing_event_pub_, "action", "grasp_move", "end",
+      detail.str() + ",ok=0,reason=pre_grasp_ik_failed");
     return false;
   }
   if (!kin_engine_->solveIK(ee_target, pitch, tool_roll, q_grasp)) {
@@ -278,6 +346,9 @@ bool TaskPrimitives::do_grasp_move(
       node_->get_logger(),
       "[grasp_move] IK failed for grasp (%.3f, %.3f, %.3f)",
       ee_target.x(), ee_target.y(), ee_target.z());
+    publish_timing_event(
+      node_, timing_event_pub_, "action", "grasp_move", "end",
+      detail.str() + ",ok=0,reason=grasp_ik_failed");
     return false;
   }
   q_pre[0] += config_.tool_yaw_offset;
@@ -289,9 +360,16 @@ bool TaskPrimitives::do_grasp_move(
     pre_target.z(), ee_target.z(), pitch, tool_roll);
 
   if (!send_move_goal(std::vector<Eigen::VectorXd>{q_pre, q_grasp})) {
+    publish_timing_event(
+      node_, timing_event_pub_, "action", "grasp_move", "end",
+      detail.str() + ",ok=0,reason=send_goal_failed");
     return false;
   }
-  return wait_for_action_completion();
+  const bool ok = wait_for_action_completion();
+  publish_timing_event(
+    node_, timing_event_pub_, "action", "grasp_move", "end",
+    detail.str() + ",ok=" + timing_bool(ok));
+  return ok;
 }
 
 bool TaskPrimitives::do_grasp_move(const geometry_msgs::msg::Pose & target)
@@ -301,6 +379,12 @@ bool TaskPrimitives::do_grasp_move(const geometry_msgs::msg::Pose & target)
 
 bool TaskPrimitives::do_place_move(const geometry_msgs::msg::Pose & target)
 {
+  std::ostringstream detail;
+  detail << "target_x=" << target.position.x
+         << ",target_y=" << target.position.y
+         << ",target_z=" << target.position.z;
+  publish_timing_event(node_, timing_event_pub_, "action", "place_move", "begin", detail.str());
+
   const double tool_roll = get_object_yaw(target);
   const double pitch = config_.grasp_pitch + config_.tool_pitch_offset;
   const double q0 = std::atan2(target.position.y, target.position.x);
@@ -325,6 +409,9 @@ bool TaskPrimitives::do_place_move(const geometry_msgs::msg::Pose & target)
       node_->get_logger(),
       "[place_move] IK failed for pre-place (%.3f, %.3f, %.3f)",
       pre_target.x(), pre_target.y(), pre_target.z());
+    publish_timing_event(
+      node_, timing_event_pub_, "action", "place_move", "end",
+      detail.str() + ",ok=0,reason=pre_place_ik_failed");
     return false;
   }
   if (!kin_engine_->solveIK(ee_target, pitch, tool_roll, q_place)) {
@@ -332,6 +419,9 @@ bool TaskPrimitives::do_place_move(const geometry_msgs::msg::Pose & target)
       node_->get_logger(),
       "[place_move] IK failed for place (%.3f, %.3f, %.3f)",
       ee_target.x(), ee_target.y(), ee_target.z());
+    publish_timing_event(
+      node_, timing_event_pub_, "action", "place_move", "end",
+      detail.str() + ",ok=0,reason=place_ik_failed");
     return false;
   }
   q_pre[0] += config_.tool_yaw_offset;
@@ -343,9 +433,15 @@ bool TaskPrimitives::do_place_move(const geometry_msgs::msg::Pose & target)
     pre_target.z(), ee_target.z(), pitch, tool_roll);
 
   if (!send_move_goal(std::vector<Eigen::VectorXd>{q_pre, q_place})) {
+    publish_timing_event(
+      node_, timing_event_pub_, "action", "place_move", "end",
+      detail.str() + ",ok=0,reason=send_goal_failed");
     return false;
   }
   if (!wait_for_action_completion()) {
+    publish_timing_event(
+      node_, timing_event_pub_, "action", "place_move", "end",
+      detail.str() + ",ok=0,reason=move_failed");
     return false;
   }
 
@@ -368,12 +464,21 @@ bool TaskPrimitives::do_place_move(const geometry_msgs::msg::Pose & target)
       RCLCPP_WARN(node_->get_logger(), "[place_move] retreat IK failed, skipping.");
     }
   }
+  publish_timing_event(
+    node_, timing_event_pub_, "action", "place_move", "end",
+    detail.str() + ",ok=1");
   return true;
 }
 
 bool TaskPrimitives::do_place_move_with_orientation(
   const geometry_msgs::msg::Pose & frame_world)
 {
+  std::ostringstream detail;
+  detail << "frame_x=" << frame_world.position.x
+         << ",frame_y=" << frame_world.position.y
+         << ",frame_z=" << frame_world.position.z;
+  publish_timing_event(node_, timing_event_pub_, "action", "place_frame", "begin", detail.str());
+
   const double tool_roll = get_frame_yaw(frame_world);
   const double pitch = config_.grasp_pitch + config_.tool_pitch_offset;
   const Eigen::Vector3d ee_target(
@@ -393,6 +498,9 @@ bool TaskPrimitives::do_place_move_with_orientation(
       node_->get_logger(),
       "[place_frame] IK failed for pre-place (%.3f, %.3f, %.3f)",
       pre_target.x(), pre_target.y(), pre_target.z());
+    publish_timing_event(
+      node_, timing_event_pub_, "action", "place_frame", "end",
+      detail.str() + ",ok=0,reason=pre_place_ik_failed");
     return false;
   }
   if (!kin_engine_->solveIK(ee_target, pitch, tool_roll, q_place)) {
@@ -400,15 +508,24 @@ bool TaskPrimitives::do_place_move_with_orientation(
       node_->get_logger(),
       "[place_frame] IK failed for place (%.3f, %.3f, %.3f)",
       ee_target.x(), ee_target.y(), ee_target.z());
+    publish_timing_event(
+      node_, timing_event_pub_, "action", "place_frame", "end",
+      detail.str() + ",ok=0,reason=place_ik_failed");
     return false;
   }
   q_pre[0] += config_.tool_yaw_offset;
   q_place[0] += config_.tool_yaw_offset;
 
   if (!send_move_goal(std::vector<Eigen::VectorXd>{q_pre, q_place})) {
+    publish_timing_event(
+      node_, timing_event_pub_, "action", "place_frame", "end",
+      detail.str() + ",ok=0,reason=send_goal_failed");
     return false;
   }
   if (!wait_for_action_completion()) {
+    publish_timing_event(
+      node_, timing_event_pub_, "action", "place_frame", "end",
+      detail.str() + ",ok=0,reason=move_failed");
     return false;
   }
 
@@ -436,12 +553,21 @@ bool TaskPrimitives::do_place_move_with_orientation(
       RCLCPP_WARN(node_->get_logger(), "[place_frame] retreat IK failed, skipping.");
     }
   }
+  publish_timing_event(
+    node_, timing_event_pub_, "action", "place_frame", "end",
+    detail.str() + ",ok=1");
   return true;
 }
 
 bool TaskPrimitives::do_stack_move_with_orientation(
   const geometry_msgs::msg::Pose & box_top_world)
 {
+  std::ostringstream detail;
+  detail << "box_top_x=" << box_top_world.position.x
+         << ",box_top_y=" << box_top_world.position.y
+         << ",box_top_z=" << box_top_world.position.z;
+  publish_timing_event(node_, timing_event_pub_, "action", "stack_move", "begin", detail.str());
+
   const double tool_roll = compute_stack_tool_roll(box_top_world, config_.stack_roll_sign);
   const double pitch = config_.grasp_pitch + config_.tool_pitch_offset;
   const Eigen::Vector3d ee_target(
@@ -461,6 +587,9 @@ bool TaskPrimitives::do_stack_move_with_orientation(
       node_->get_logger(),
       "[stack] IK failed for pre-stack (%.3f, %.3f, %.3f)",
       pre_target.x(), pre_target.y(), pre_target.z());
+    publish_timing_event(
+      node_, timing_event_pub_, "action", "stack_move", "end",
+      detail.str() + ",ok=0,reason=pre_stack_ik_failed");
     return false;
   }
   if (!kin_engine_->solveIK(ee_target, pitch, tool_roll, q_stack)) {
@@ -468,15 +597,24 @@ bool TaskPrimitives::do_stack_move_with_orientation(
       node_->get_logger(),
       "[stack] IK failed for stack (%.3f, %.3f, %.3f)",
       ee_target.x(), ee_target.y(), ee_target.z());
+    publish_timing_event(
+      node_, timing_event_pub_, "action", "stack_move", "end",
+      detail.str() + ",ok=0,reason=stack_ik_failed");
     return false;
   }
   q_pre[0] += config_.tool_yaw_offset;
   q_stack[0] += config_.tool_yaw_offset;
 
   if (!send_move_goal(std::vector<Eigen::VectorXd>{q_pre, q_stack})) {
+    publish_timing_event(
+      node_, timing_event_pub_, "action", "stack_move", "end",
+      detail.str() + ",ok=0,reason=send_goal_failed");
     return false;
   }
   if (!wait_for_action_completion()) {
+    publish_timing_event(
+      node_, timing_event_pub_, "action", "stack_move", "end",
+      detail.str() + ",ok=0,reason=move_failed");
     return false;
   }
 
@@ -504,25 +642,34 @@ bool TaskPrimitives::do_stack_move_with_orientation(
       RCLCPP_WARN(node_->get_logger(), "[stack] retreat IK failed, skipping.");
     }
   }
+  publish_timing_event(
+    node_, timing_event_pub_, "action", "stack_move", "end",
+    detail.str() + ",ok=1");
   return true;
 }
 
 bool TaskPrimitives::do_full_grasp(const geometry_msgs::msg::Pose & target)
 {
+  publish_timing_event(node_, timing_event_pub_, "sequence", "full_grasp", "begin");
   target_pub_->publish(target);
   request_mode_switch("moving");
   do_look_out(target);
   wait_joints_still(0.02, 200);
 
   if (!do_grasp_move(target)) {
+    publish_timing_event(
+      node_, timing_event_pub_, "sequence", "full_grasp", "end",
+      "ok=0,reason=grasp_move_failed");
     return false;
   }
   do_suction_on();
+  publish_timing_event(node_, timing_event_pub_, "sequence", "full_grasp", "end", "ok=1");
   return true;
 }
 
 bool TaskPrimitives::do_full_grasp_aligned(const geometry_msgs::msg::Pose & target)
 {
+  publish_timing_event(node_, timing_event_pub_, "sequence", "full_grasp_aligned", "begin");
   target_pub_->publish(target);
   request_mode_switch("moving");
   do_look_out(target);
@@ -530,6 +677,7 @@ bool TaskPrimitives::do_full_grasp_aligned(const geometry_msgs::msg::Pose & targ
 
   constexpr int kSamples = 3;
   std::vector<geometry_msgs::msg::Pose> samples;
+  publish_timing_event(node_, timing_event_pub_, "perception", "pick_samples_aligned", "begin");
   for (int i = 0; i < kSamples; ++i) {
     geometry_msgs::msg::Pose p;
     if (perception_client_->call_pick_service_sync(config_.pick_object_name, &p)) {
@@ -538,6 +686,9 @@ bool TaskPrimitives::do_full_grasp_aligned(const geometry_msgs::msg::Pose & targ
       RCLCPP_WARN(node_->get_logger(), "[grasp_aligned] sample %d/%d failed", i + 1, kSamples);
     }
   }
+  publish_timing_event(
+    node_, timing_event_pub_, "perception", "pick_samples_aligned", "end",
+    "success_count=" + std::to_string(samples.size()) + ",sample_count=" + std::to_string(kSamples));
 
   geometry_msgs::msg::Pose refined = target;
   double roll = get_box_edge_roll(target);
@@ -572,19 +723,26 @@ bool TaskPrimitives::do_full_grasp_aligned(const geometry_msgs::msg::Pose & targ
   }
 
   if (!do_grasp_move(refined, roll)) {
+    publish_timing_event(
+      node_, timing_event_pub_, "sequence", "full_grasp_aligned", "end",
+      "ok=0,reason=grasp_move_failed");
     return false;
   }
   do_suction_on();
+  publish_timing_event(
+    node_, timing_event_pub_, "sequence", "full_grasp_aligned", "end", "ok=1");
   return true;
 }
 
 bool TaskPrimitives::do_grasp_from_current_view()
 {
+  publish_timing_event(node_, timing_event_pub_, "sequence", "grasp_from_current_view", "begin");
   request_mode_switch("moving");
   wait_joints_still(0.02, 200);
 
   constexpr int kSamples = 3;
   std::vector<geometry_msgs::msg::Pose> samples;
+  publish_timing_event(node_, timing_event_pub_, "perception", "pick_samples_current_view", "begin");
   for (int i = 0; i < kSamples; ++i) {
     geometry_msgs::msg::Pose p;
     if (perception_client_->call_pick_service_sync(config_.pick_object_name, &p)) {
@@ -593,9 +751,15 @@ bool TaskPrimitives::do_grasp_from_current_view()
       RCLCPP_WARN(node_->get_logger(), "[grasp_current_view] sample %d/%d failed", i + 1, kSamples);
     }
   }
+  publish_timing_event(
+    node_, timing_event_pub_, "perception", "pick_samples_current_view", "end",
+    "success_count=" + std::to_string(samples.size()) + ",sample_count=" + std::to_string(kSamples));
 
   if (samples.empty()) {
     RCLCPP_ERROR(node_->get_logger(), "[grasp_current_view] all perception samples failed.");
+    publish_timing_event(
+      node_, timing_event_pub_, "sequence", "grasp_from_current_view", "end",
+      "ok=0,reason=all_perception_failed");
     return false;
   }
 
@@ -634,20 +798,29 @@ bool TaskPrimitives::do_grasp_from_current_view()
     roll, roll * 180.0 / M_PI);
 
   if (!do_grasp_move(refined, roll)) {
+    publish_timing_event(
+      node_, timing_event_pub_, "sequence", "grasp_from_current_view", "end",
+      "ok=0,reason=grasp_move_failed");
     return false;
   }
   do_suction_on();
+  publish_timing_event(
+    node_, timing_event_pub_, "sequence", "grasp_from_current_view", "end", "ok=1");
   return true;
 }
 
 bool TaskPrimitives::do_full_place(const geometry_msgs::msg::Pose & target)
 {
+  publish_timing_event(node_, timing_event_pub_, "sequence", "full_place", "begin");
   target_pub_->publish(target);
   request_mode_switch("moving");
   do_look_out(target);
 
   RCLCPP_INFO(node_->get_logger(), "[place] moving to pre-place then place...");
   if (!do_place_move(target)) {
+    publish_timing_event(
+      node_, timing_event_pub_, "sequence", "full_place", "end",
+      "ok=0,reason=place_move_failed");
     return false;
   }
 
@@ -657,6 +830,7 @@ bool TaskPrimitives::do_full_place(const geometry_msgs::msg::Pose & target)
   rclcpp::sleep_for(300ms);
 
   RCLCPP_INFO(node_->get_logger(), "[place] done.");
+  publish_timing_event(node_, timing_event_pub_, "sequence", "full_place", "end", "ok=1");
   return true;
 }
 

@@ -14,6 +14,7 @@
 #include "navigation/srv/mission_command.hpp"
 #include "navigation/srv/string_command.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "std_msgs/msg/string.hpp"
 
 namespace arm2_task::task
 {
@@ -47,9 +48,14 @@ private:
   void publish_mission_response_debug(const navigation::srv::MissionCommand::Response & response);
   void publish_nav_event_request_debug(const navigation::srv::StringCommand::Request & request);
   void publish_nav_event_response_debug(const navigation::srv::StringCommand::Response & response);
+  const char * task_state_name(arm2_task::TaskState state) const;
+  void set_task_state(arm2_task::TaskState next_state, const std::string & reason);
   bool compute_command_relative_pose(
     const MissionCommand & command,
     RelativePlanarPose * relative_pose);
+  bool do_lookout_align_for_command(
+    const MissionCommand & command,
+    const char * context);
   bool do_ready_sequence(const MissionCommand & command);
   bool do_grasp_sequence(const MissionCommand & command);
   bool do_place_sequence();
@@ -58,6 +64,9 @@ private:
   void clear_active_ready_command();
   std::optional<MissionCommand> active_ready_command_copy();
   bool do_pickup_lookout_align(const MissionCommand & command);
+  bool handle_debug_state_command(
+    const navigation::srv::MissionCommand::Request & request,
+    navigation::srv::MissionCommand::Response * response);
 
   rclcpp::Node * node_{nullptr};
   TaskSequences * sequences_{nullptr};
@@ -68,11 +77,13 @@ private:
   arm2_task::TaskState state_{arm2_task::TaskState::IDLE};
   std::atomic<bool> remote_busy_{false};
   rclcpp::Service<navigation::srv::MissionCommand>::SharedPtr arm_mission_server_;
+  rclcpp::Service<navigation::srv::MissionCommand>::SharedPtr debug_state_server_;
   rclcpp::Client<navigation::srv::StringCommand>::SharedPtr nav_event_client_;
   rclcpp::Publisher<navigation::srv::MissionCommand::Request>::SharedPtr mission_request_debug_pub_;
   rclcpp::Publisher<navigation::srv::MissionCommand::Response>::SharedPtr mission_response_debug_pub_;
   rclcpp::Publisher<navigation::srv::StringCommand::Request>::SharedPtr nav_event_request_debug_pub_;
   rclcpp::Publisher<navigation::srv::StringCommand::Response>::SharedPtr nav_event_response_debug_pub_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr timing_event_pub_;
   std::mutex cmd_mutex_;
   std::condition_variable cmd_cv_;
   std::optional<MissionCommand> pending_command_;

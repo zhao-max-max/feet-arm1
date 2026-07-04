@@ -17,6 +17,7 @@
 #include "arm2_task/task/perception_client.hpp"
 #include "geometry_msgs/msg/pose.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "std_msgs/msg/string.hpp"
 
 namespace arm2_task::task
 {
@@ -108,6 +109,7 @@ private:
   const std::atomic<bool> * is_running_{nullptr};
   Config config_;
   double last_grasp_roll_{std::numeric_limits<double>::quiet_NaN()};
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr timing_event_pub_;
 };
 
 }  // namespace arm2_task::task
