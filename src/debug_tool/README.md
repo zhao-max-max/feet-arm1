@@ -29,6 +29,14 @@ ros2 run debug_tool debug_tool_node --ros-args \
   -p state_topic:=/arm2/_lowState/joint \
   -p command_topic:=/arm2/_lowCmd/command \
   -p ready_topic:=/robot_driver/ready \
+  -p nav_state_topic:=/navigation/state \
+  -p nav_task_points_topic:=/navigation/task_points \
+  -p arm_mission_service:=/arm/mission_event \
+  -p nav_arm_event_service:=/navigation/arm_event \
+  -p nav_mission_request_topic:=/debug/nav/mission_request \
+  -p nav_mission_response_topic:=/debug/nav/mission_response \
+  -p nav_arm_event_request_topic:=/debug/nav/arm_event_request \
+  -p nav_arm_event_response_topic:=/debug/nav/arm_event_response \
   -p report_period_sec:=1.0 \
   -p csv_enabled:=true \
   -p csv_dir:=debug_tool_logs \
@@ -48,7 +56,12 @@ The node prints:
 - driver ready state from `/robot_driver/ready`
 - current joint position in degrees and velocity from `/arm2/_lowState/joint`
 - latest angle control command from `/arm2/_lowCmd/command`
+- latest nav pose from `/navigation/state`
+- latest nav task-point snapshot from `/navigation/task_points`
 - availability of common arm services from `robot_msgs`
+- availability of `/arm/mission_event` and `/navigation/arm_event`
+- latest mirrored `/arm/mission_event` request/response debug topics
+- latest mirrored `/navigation/arm_event` request/response debug topics
 - availability of the `move_joint` action server
 
 CSV logging is enabled by default. Each run creates one file named with the node startup time:
@@ -59,6 +72,8 @@ debug_tool_logs/YYYYMMDD_HHMMSS.csv
 
 Each row contains a wall-clock timestamp, ROS time, elapsed time, driver ready state, service/action availability, joint feedback, and command fields:
 
+- nav integration: `nav_state_x`, `nav_state_y`, `nav_state_yaw`, `nav_task_points_*`
+- nav mission tracing: `nav_mission_*`, `nav_arm_event_*`
 - feedback: `state_q_rad_*`, `state_q_deg_*`, `state_dq_*`, `state_tau_est_*`, `state_valid_*`
 - command: `cmd_q_rad_*`, `cmd_q_deg_*`, `cmd_dq_*`, `cmd_tau_*`, `cmd_kp_*`, `cmd_kd_*`
 
@@ -97,3 +112,48 @@ ros2 run debug_tool joint_slider_ui --ros-args \
   -p joint_lower_deg:="[-240.0, 0.0, -172.0, -115.0, -180.0]" \
   -p joint_upper_deg:="[240.0, 200.0, 10.0, 90.0, 180.0]"
 ```
+
+## Navigation Mock UI
+
+`nav_mock_ui` is a Qt tool that replaces the nav package and real lidar for arm-side debugging without modifying the external `navigation` package.
+
+It provides:
+
+- a mock `/navigation/state` odometry publisher
+- a mock `/navigation/task_points` publisher
+- a client for `/arm/mission_event`
+- a server for `/navigation/arm_event`
+- a 2D map view for task points, mock pose, and `/task/target_pose`
+- subscriptions to `/debug/nav/*` mirror topics published by `arm2_task`
+
+Run:
+
+```bash
+source install/setup.bash
+ros2 run debug_tool nav_mock_ui
+```
+
+Or through launch:
+
+```bash
+ros2 launch debug_tool nav_mock_ui.launch.py
+```
+
+Useful parameters:
+
+```bash
+ros2 run debug_tool nav_mock_ui --ros-args \
+  -p nav_state_topic:=/navigation/state \
+  -p nav_task_points_topic:=/navigation/task_points \
+  -p arm_mission_service:=/arm/mission_event \
+  -p nav_arm_event_service:=/navigation/arm_event \
+  -p pose_auto_publish:=true \
+  -p pose_publish_hz:=10.0
+```
+
+Interaction notes:
+
+- left-click a task point on the map to select it
+- right-click the map to move the mock lidar pose in `x/y`
+- edit pose, task points, and mission fields from the right panel
+- incoming arm callbacks are answered automatically using the configured response fields

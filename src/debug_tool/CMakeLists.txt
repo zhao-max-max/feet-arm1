@@ -6,6 +6,9 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 endif()
 
 find_package(ament_cmake REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
+find_package(navigation REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_action REQUIRED)
 find_package(robot_msgs REQUIRED)
@@ -17,6 +20,8 @@ add_executable(debug_tool_node
 )
 target_compile_features(debug_tool_node PUBLIC cxx_std_17)
 ament_target_dependencies(debug_tool_node
+  nav_msgs
+  navigation
   rclcpp
   rclcpp_action
   robot_msgs
@@ -25,6 +30,25 @@ ament_target_dependencies(debug_tool_node
 
 install(TARGETS
   debug_tool_node
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+add_executable(nav_mock_ui
+  src/nav_mock_ui.cpp
+)
+target_compile_features(nav_mock_ui PUBLIC cxx_std_17)
+ament_target_dependencies(nav_mock_ui
+  geometry_msgs
+  nav_msgs
+  navigation
+  rclcpp
+)
+target_link_libraries(nav_mock_ui
+  Qt5::Widgets
+)
+
+install(TARGETS
+  nav_mock_ui
   DESTINATION lib/${PROJECT_NAME}
 )
 

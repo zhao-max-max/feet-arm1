@@ -43,6 +43,10 @@ private:
   void log_nav_pose_snapshot(const char * context);
   void log_mission_command(const MissionCommand & command);
   void send_nav_event(const std::string & event);
+  void publish_mission_request_debug(const navigation::srv::MissionCommand::Request & request);
+  void publish_mission_response_debug(const navigation::srv::MissionCommand::Response & response);
+  void publish_nav_event_request_debug(const navigation::srv::StringCommand::Request & request);
+  void publish_nav_event_response_debug(const navigation::srv::StringCommand::Response & response);
   bool compute_command_relative_pose(
     const MissionCommand & command,
     RelativePlanarPose * relative_pose);
@@ -53,8 +57,7 @@ private:
   void cache_active_ready_command(const MissionCommand & command);
   void clear_active_ready_command();
   std::optional<MissionCommand> active_ready_command_copy();
-  void request_lookout_realign();
-  bool do_periodic_lookout_align();
+  bool do_pickup_lookout_align(const MissionCommand & command);
 
   rclcpp::Node * node_{nullptr};
   TaskSequences * sequences_{nullptr};
@@ -66,12 +69,14 @@ private:
   std::atomic<bool> remote_busy_{false};
   rclcpp::Service<navigation::srv::MissionCommand>::SharedPtr arm_mission_server_;
   rclcpp::Client<navigation::srv::StringCommand>::SharedPtr nav_event_client_;
-  rclcpp::TimerBase::SharedPtr lookout_realign_timer_;
+  rclcpp::Publisher<navigation::srv::MissionCommand::Request>::SharedPtr mission_request_debug_pub_;
+  rclcpp::Publisher<navigation::srv::MissionCommand::Response>::SharedPtr mission_response_debug_pub_;
+  rclcpp::Publisher<navigation::srv::StringCommand::Request>::SharedPtr nav_event_request_debug_pub_;
+  rclcpp::Publisher<navigation::srv::StringCommand::Response>::SharedPtr nav_event_response_debug_pub_;
   std::mutex cmd_mutex_;
   std::condition_variable cmd_cv_;
   std::optional<MissionCommand> pending_command_;
   std::optional<MissionCommand> active_ready_command_;
-  bool lookout_realign_requested_{false};
 };
 
 }  // namespace arm2_task::task
