@@ -533,7 +533,7 @@ void ControlNode::load_all_gains()
         g.kd = this->declare_parameter("gains." + mode + ".kd", std::vector<double>(5, 0.0));
         gains_map_[mode] = g;
     }
-    current_gains_ = gains_map_["gravity_comp"];
+    current_gains_ = gains_map_["idle"];
 }
 
 void ControlNode::handle_mode_change(const std::shared_ptr<robot_msgs::srv::SetControllerMode::Request> request,
