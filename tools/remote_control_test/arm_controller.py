@@ -3,8 +3,9 @@
 arm_controller.py — 机械臂远程控制测试节点
 
 用法：
-  # 1. 先把 params.yaml 里 task.remote_mode 改为 true 再启动机械臂
-  # 2. source ROS2 环境后运行本脚本
+  # 注意：当前 task_node 不读取 task.remote_mode，也不订阅 /arm/cmd。
+  # 本脚本仅保留旧版话题控制协议的测试入口。
+  # source ROS2 环境后运行本脚本
   #    python3 arm_controller.py
   #    python3 arm_controller.py --once grasp   # 发一条命令后退出
   #    python3 arm_controller.py --once place

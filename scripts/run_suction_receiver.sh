@@ -5,7 +5,7 @@ ROOT_DIR="/home/primarymage/WorkFile/esp_ws"
 WS_DIR="${ROOT_DIR}/ros2_suction_ws"
 SERIAL_PORT="${1:-/dev/esp32_suction_c3}"
 SERVICE_NAME="${2:-set_suction}"
-ROS_DOMAIN_ID_VALUE="${3:-0}"
+ROS_DOMAIN_ID_VALUE="${3:-65}"
 RMW_IMPL="${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}"
 
 if [[ ! -f /opt/ros/humble/setup.bash ]]; then

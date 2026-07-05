@@ -28,7 +28,7 @@ double max_t = 0.2; // 设定一个最小时间阈值（提速：0.5→0.2s）�
 **原理**：control_node 计算每段轨迹时长时（`plan_trapezoid`，第 750-780 行），先把段时长初始化为这个地板值，再按 `max_velocity` / `max_acceleration` 算各关节所需时间取最大；只有算出来超过地板值才会抬高。因此**任何短距离段（预抓取下降、放置后退、joint_4 转向等）最少都要花这个时间**。从 0.5 降到 0.2，这些短段直接快 0.3s/段，一个完整抓放周期累计可省数秒。
 
 **注意**：
-- 这是真正生效的"最短段时长"。`params.yaml` 里的 `trajectory_planner.min_segment_duration: 0.3` **未被 control_node 读取**（属备用节点参数），改它无效。
+- 这是真正生效的"最短段时长"。当前没有对应 yaml 参数；`control_node` 不读取 `trajectory_planner.min_segment_duration`。
 - 降太低可能让短段启停过猛产生冲击/抖动，尤其负载段。如实机有顿挫，回调到 0.3。
 
 ---
@@ -57,12 +57,12 @@ wait_joints_still(0.02, 200);
 
 | 项 | 位置 | 说明 |
 |---|---|---|
-| 运动速度上限 | `params.yaml` → `trajectory_planner.max_velocity: 0.7` / `max_acceleration: 1.5` | 提到 1.0~1.2 / 2.5~3.0 可加速大角度运动（look_out 转身、复位）。负载段提速过猛会甩动，先验证空载。 |
+| 运动速度上限 | `task_params.yaml` → `trajectory_planner.max_velocity` / `max_acceleration` | 提到 1.0~1.2 / 2.5~3.0 可加速大角度运动（look_out 转身、复位）。负载段提速过猛会甩动，先验证空载。 |
 | 吸盘等待 | `task_node.cpp:1271-1274` `do_suction_on` | `400ms 等稳 + 500ms 等吸牢` = 900ms，可按真空建立速度压缩。 |
 | case 6 冗余预瞭望 | `task_node.cpp` case 6 真机分支（约 2220 行） | 先 look_out + 单次感知，再进 `do_full_grasp_aligned` 又 look_out + 3 次感知，前一段重复，可去掉省一次瞭望 + 一次感知。 |
 | 抓后冗余 sleep | `task_node.cpp:1937` `do_grasp_sequence` | 紧跟 `do_suction_on` 又 `sleep 500ms`，基本冗余，可删/减半。 |
 | 放置松吸盘 sleep | `task_node.cpp:815/817` | `200ms + 300ms` 可压缩。 |
-| Phase-2 对齐 | `params.yaml` → `visual_align.max_iters: 5` | 视觉够准时可降到 2-3 次。`align_threshold: 0.005` 可放宽到 0.008-0.01。 |
+| Phase-2 对齐 | `task_params.yaml` → `visual_align.max_iters` | 视觉够准时可降到 2-3 次。`align_threshold: 0.005` 可放宽到 0.008-0.01。 |
 | 3 次感知取中位数 | `task_node.cpp:1468` `do_full_grasp_aligned` | 视觉够稳时可降到 1 次，但牺牲 roll 稳定性，最后再动。 |
 
 ---

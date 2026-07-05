@@ -131,7 +131,7 @@ pinocchio::SE3 forwardKinematics(const Eigen::VectorXd& q);
 | 类型 | 名称 | 说明 |
 |---|---|---|
 | Action Server | `move_joint` | 轨迹跟踪（5阶多项式 + blending） |
-| Service | `set_controller_mode` | 切换 PD 增益组：`idle/moving/loaded/gravity_comp/teach_pendant/teach_drag` |
+| Service | `set_controller_mode` | 切换 PD 增益组：`idle/moving/loaded/gravity_comp` |
 | Service | `get_payload_estimate` | 触发负载质量估计 |
 | TF (动态) | `world → Link_4` | 由 FK 实时计算发布 |
 | TF (静态) | `Link_4 → camera_link` | 由 params.yaml `camera_extrinsics` 配置 |
@@ -144,12 +144,12 @@ pinocchio::SE3 forwardKinematics(const Eigen::VectorXd& q);
 | `get_place_pos` | 狗头相机感知节点返回放置框位姿（`GetPlacePos.srv`），frame_id = `dog_camera_link` |
 | `set_suction` | 吸盘开关（`SetSuction.srv`） |
 
-### 远程控制话题（task.remote_mode: true 时启用）
+### 导航触发接口（nav 模式）
 
-| 话题 | 方向 | 类型 | 说明 |
+| 接口 | 方向 | 类型 | 说明 |
 |---|---|---|---|
-| `/arm/cmd` | 接收 | `std_msgs/String` | `"grasp"` / `"place"` |
-| `/arm/status` | 发布 | `std_msgs/String` | `"grasped"` / `"stowed"` / `"placed"` / `"reset"` / `"error:xxx"` |
+| `/arm/mission_event` | 接收 | `navigation/srv/MissionEvent` | 导航请求抓取/放置 |
+| `/navigation/arm_event` | 调用 | `navigation/srv/ArmEvent` | 机械臂向导航反馈任务事件 |
 
 ---
 
@@ -169,15 +169,15 @@ float64[] joint_targets   # 5*num_points 个值，按行展开
 
 ---
 
-## 6. 预设位姿（params.yaml 里改角度，运行时自动转 rad）
+## 6. 预设位姿（task_params.yaml 里改角度，运行时自动转 rad）
 
 | 名称 | 角度 [joint0..4]° | 用途 |
 |---|---|---|
-| `look_out` | [0, 120, -150, 0, 0] | 瞭望姿态，相机朝斜下方（视野广，Phase-1 用） |
-| `load` | [0, 90, -90, -90, 0] | 俯瞰姿态，相机朝正下方（Phase-2 对齐用） |
+| `look_out` | [0, 90, -145, 0, 0] | 瞭望姿态，相机朝斜下方（视野广，Phase-1 用） |
+| `load` | [0, 90, -80, -90, 0] | 俯瞰姿态，相机朝正下方（Phase-2 对齐用） |
 | `reset` | [0, 175, -170, 10, 0] | 收回/待机姿态 |
 
-**改法**：`src/arm2_task/config/params.yaml` → `presets:` 节点下直接改角度数字。
+**改法**：`src/arm2_task/config/task_params.yaml` → `presets:` 节点下直接改角度数字。
 
 ---
 
@@ -237,24 +237,24 @@ Phase 3 Place（放置下降，对称）
 
 ---
 
-## 9. 参数速查表（全部在 params.yaml 里改）
+## 9. 参数速查表
 
-文件路径：`src/arm2_task/config/params.yaml`
+控制参数在 `src/arm2_task/config/params.yaml`，任务/nav 参数在 `src/arm2_task/config/task_params.yaml`。
 
 ### 运动参数
 
 | 参数键 | 当前值 | 说明 | 改了影响 |
 |---|---|---|---|
-| `trajectory_planner.max_velocity` | 0.8 | 最大关节速度 (rad/s) | 所有运动快慢 |
-| `trajectory_planner.max_acceleration` | 1.2 | 最大关节加速度 (rad/s²) | 所有运动加速度 |
-| `trajectory_planner.dist_threshold` | 0.05 | 轨迹 blend 半径 | 多段轨迹平滑度 |
+| `trajectory_planner.max_velocity` | 1.0 | 最大关节速度 (rad/s) | task_node 发送 move_joint goal 的速度 |
+| `trajectory_planner.max_acceleration` | 2.0 | 最大关节加速度 (rad/s²) | task_node 发送 move_joint goal 的加速度 |
+| `trajectory_planner.dist_threshold` | 0.10 | 轨迹 blend 半径 | 多段轨迹平滑度 |
 
 ### 预设姿态（角度制）
 
 | 参数键 | 当前值 | 改了影响 |
 |---|---|---|
-| `presets.look_out` | [0,120,-150,0,0] | Phase-1 瞭望姿态 / case 6 感知姿态 |
-| `presets.load` | [0,90,-90,-90,0] | Phase-2 俯视对齐姿态 / case 10 |
+| `presets.look_out` | [0,90,-145,0,0] | Phase-1 瞭望姿态 / case 6 感知姿态 |
+| `presets.load` | [0,90,-80,-90,0] | Phase-2 俯视对齐姿态 / case 10 |
 | `presets.reset` | [0,175,-170,10,0] | case 1/9 复位姿态 |
 
 ### 抓取/放置参数
@@ -265,7 +265,7 @@ Phase 3 Place（放置下降，对称）
 | `task_step6.object_height` | 0.005 | 物体高度偏移 (m)，直接加到目标 Z 上（末端落点 = target.z + object_height + tool_offset_z） |
 | `task_step6.pre_grasp_offset` | 0.10 | 预抓取高度偏移 (m)，在末端落点上方悬停的高度 |
 | `task_step6.tool_offset_x/y` | 0.0 | 工具末端相对物体中心的 XY 偏移 (m) |
-| `task_step6.tool_offset_z` | -0.17 | 工具末端 Z 偏移 (m)，**补偿 MuJoCo base_link Z=0.38m 偏置** |
+| `task_step6.tool_offset_z` | 0.0 | 工具末端 Z 偏移 (m) |
 | `task_step6.pick_object_name` | "box" | 传给 get_pick_pos 服务的物体名 |
 | `task_step6.use_mock_target` | false | true = case 6 用 mock 坐标（调试用） |
 | `task_step6.mock_x/y/z` | 0.35/0/0.12 | mock 目标坐标 (m) |
@@ -285,7 +285,7 @@ Phase 3 Place（放置下降，对称）
 |---|---|---|
 | `task.require_payload_service` | false | true = 没有 payload 服务时启动失败 |
 | `task.require_suction_service` | false | true = 没有 suction 服务时启动失败 |
-| `task.remote_mode` | false | true = 通过 `/arm/cmd` topic 控制；false = 菜单交互模式 |
+| `task.manual_mode` | false | `run_arm.sh` 按 nav/terminal 模式覆盖；false = 等待 `/arm/mission_event` |
 
 ### 相机外参
 
@@ -366,28 +366,28 @@ bash run_arm.sh --build
 ## 13. 常见调试场景
 
 ### 对齐太慢/太快
-改 `visual_align.max_iters`（次数）。
+改 `src/arm2_task/config/task_params.yaml` 里的 `visual_align.max_iters`（次数）。
 
 ### 抓不到（末端位置偏高/偏低）
 按顺序排查：
 1. 看日志确认 `get_pick_pos` 返回的 world Z 是否合理
-2. 改 `task_step6.tool_offset_z`（整体抬高/降低，主要补偿量）
-3. 改 `task_step6.object_height`（微调，物体顶面高度）
+2. 改 `task_params.yaml` 里的 `task_step6.tool_offset_z`（整体抬高/降低，主要补偿量）
+3. 改 `task_params.yaml` 里的 `task_step6.object_height`（微调，物体顶面高度）
 
 ### 预抓取碰到物体
-增大 `task_step6.pre_grasp_offset`。
+增大 `task_params.yaml` 里的 `task_step6.pre_grasp_offset`。
 
 ### 工具方向偏转（roll 对不上物体）
 `get_object_yaw()` 计算的是 `atan2(obj.y, obj.x) - joint_0`。如果物体方向与预期不符，检查感知服务返回的 world XY 坐标是否正确。
 
 ### Phase-2 不收敛
 1. 先检查 `get_pick_pos` 服务输出的坐标是否稳定
-2. 放宽 `visual_align.align_threshold`（增大收敛阈值）
-3. 或增大 `visual_align.max_iters`（允许更多次迭代）
+2. 放宽 `task_params.yaml` 里的 `visual_align.align_threshold`（增大收敛阈值）
+3. 或增大 `task_params.yaml` 里的 `visual_align.max_iters`（允许更多次迭代）
 
 ### 快速验证流程（不接真机）
-1. `task.require_suction_service: false`（跳过吸盘）
-2. `task_step6.use_mock_target: true`（case 6 用固定坐标）
+1. `task_params.yaml` 里设 `task.require_suction_service: false`（跳过吸盘）
+2. `task_params.yaml` 里设 `task_step6.use_mock_target: true`（case 6 用固定坐标）
 3. Phase-1 选 `(m)anual` 手动输入坐标
 
 ### task_node 卡在 "Waiting for first robot joint state..."
@@ -397,7 +397,7 @@ bash run_arm.sh --build
 
 ## 14. 远程控制模式
 
-`params.yaml` 设 `task.remote_mode: true` 后，task_node 启动时自动执行 reset，之后通过 topic 接受外部命令，不弹菜单。
+当前 `task_node` 不读取旧的 `task.remote_mode`。`bash run_arm.sh` 通过 nav/terminal 模式覆盖 `task.manual_mode`，nav 模式等待 `/arm/mission_event`，terminal 模式进入菜单。
 
 ### 时序
 

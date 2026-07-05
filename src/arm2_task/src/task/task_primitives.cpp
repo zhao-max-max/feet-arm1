@@ -626,6 +626,7 @@ bool TaskPrimitives::do_place_move_with_direct_height(
   do_suction_off();
   rclcpp::sleep_for(300ms);
 
+  std::vector<Eigen::VectorXd> post_release_waypoints;
   if (q_snap.size() == 5) {
     const auto fk = kin_engine_->forwardKinematics(q_snap);
     Eigen::Vector3d retreat_pos = fk.translation();
@@ -635,13 +636,38 @@ bool TaskPrimitives::do_place_move_with_direct_height(
     if (kin_engine_->solveIK(retreat_pos, pitch, tool_roll, q_retreat)) {
       q_retreat[0] += config_.tool_yaw_offset;
       RCLCPP_INFO(
-        node_->get_logger(), "[place_direct] retreating %.2fm upward",
+        node_->get_logger(), "[place_direct] adding retreat waypoint %.2fm upward",
         config_.place_retreat_offset);
-      if (send_move_goal(std::vector<Eigen::VectorXd>{q_retreat})) {
-        wait_for_action_completion();
-      }
+      post_release_waypoints.push_back(q_retreat);
     } else {
-      RCLCPP_WARN(node_->get_logger(), "[place_direct] retreat IK failed, skipping.");
+      RCLCPP_WARN(node_->get_logger(), "[place_direct] retreat IK failed, falling back to reset only.");
+    }
+  } else {
+    RCLCPP_WARN(node_->get_logger(), "[place_direct] no joint snapshot for retreat, falling back to reset only.");
+  }
+
+  if (presets_ != nullptr && presets_->count("reset")) {
+    post_release_waypoints.push_back(presets_->at("reset"));
+  } else {
+    RCLCPP_WARN(node_->get_logger(), "[place_direct] Preset 'reset' not found; post-place reset skipped.");
+  }
+
+  if (!post_release_waypoints.empty()) {
+    RCLCPP_INFO(
+      node_->get_logger(),
+      "[place_direct] post-release move_joint with %zu waypoint(s).",
+      post_release_waypoints.size());
+    if (!send_move_goal(post_release_waypoints)) {
+      publish_timing_event(
+        node_, timing_event_pub_, "action", "place_direct_height", "end",
+        detail.str() + ",ok=0,reason=post_release_send_failed");
+      return false;
+    }
+    if (!wait_for_action_completion()) {
+      publish_timing_event(
+        node_, timing_event_pub_, "action", "place_direct_height", "end",
+        detail.str() + ",ok=0,reason=post_release_move_failed");
+      return false;
     }
   }
 

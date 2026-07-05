@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="/home/primarymage/WorkFile/esp_ws"
 WS_DIR="${ROOT_DIR}/ros2_suction_ws"
 SERVICE_NAME="${1:-set_suction}"
-ROS_DOMAIN_ID_VALUE="${2:-0}"
+ROS_DOMAIN_ID_VALUE="${2:-65}"
 RMW_IMPL="${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}"
 
 if [[ ! -f /opt/ros/humble/setup.bash ]]; then

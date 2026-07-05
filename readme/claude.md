@@ -49,7 +49,8 @@ ROS2 消息序列化按字段顺序排列内存，两边布局错位，task_node
 | 文件 | 说明 |
 |---|---|
 | `src/arm2_task/src/task_node.cpp` | 主任务节点，含抓取/放置/视觉对齐逻辑 |
-| `src/arm2_task/config/params.yaml` | 所有可调参数（tool offset、pitch、preset 角度等） |
+| `src/arm2_task/config/params.yaml` | control_node 参数（动力学、gains、相机外参） |
+| `src/arm2_task/config/task_params.yaml` | task_node 参数（tool offset、pitch、preset、nav/place 等） |
 | `src/dm_motor_sdk_ros/src/dm_motor_robot_driver_node.cpp` | 达妙电机 CAN 驱动节点 |
 | `src/robot_msgs/srv/GetPickPos.srv` | 感知服务接口（**与 neweyes workspace 必须保持同步**） |
 | `neweyes/src/my_pick_pipeline/my_pick_pipeline/realtime_inference.py` | 视觉感知服务端 |

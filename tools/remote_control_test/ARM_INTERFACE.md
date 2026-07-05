@@ -11,7 +11,9 @@
 |---|---|
 | ROS2 版本 | Humble |
 | 节点名 | `task_manager_node` |
-| 启用方式 | `params.yaml` 中设置 `task.remote_mode: true`，然后正常启动机械臂 |
+| 启用方式 | 旧版 `/arm/cmd` 话题客户端；当前 `run_arm.sh` nav 模式入口已改为 `/arm/mission_event` 服务 |
+
+> 注意：当前 `task_node` 不读取 `task.remote_mode`，也不订阅 `/arm/cmd`。本目录仅保留旧版话题控制协议说明。
 
 ---
 

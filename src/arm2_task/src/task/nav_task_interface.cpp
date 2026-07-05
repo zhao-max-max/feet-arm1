@@ -703,7 +703,6 @@ bool NavTaskInterface::do_place_sequence(const MissionCommand & command)
 
   rclcpp::sleep_for(500ms);
   send_nav_event("placed");
-  primitives_->do_reset();
   send_nav_event("completed");
   publish_timing_event(
     node_, timing_event_pub_, "mission", "place_sequence", "end",

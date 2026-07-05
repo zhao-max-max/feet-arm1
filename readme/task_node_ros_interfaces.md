@@ -10,7 +10,7 @@
 |---|---|
 | 节点名 | `task_manager_node` |
 | 可执行文件 | `arm2_task/task_node` |
-| 默认参数文件 | `src/arm2_task/config/params.yaml` |
+| 默认参数文件 | `src/arm2_task/config/task_params.yaml` |
 | 手动菜单模式 | `task.manual_mode: true` |
 | 导航触发模式 | `task.manual_mode: false` |
 
@@ -21,7 +21,7 @@
 bash run_arm.sh
 
 # 单独启动 task_node 时，需要先确保 driver 和 control_node 已运行
-ros2 run arm2_task task_node --ros-args --params-file src/arm2_task/config/params.yaml
+ros2 run arm2_task task_node --ros-args --params-file src/arm2_task/config/task_params.yaml
 ```
 
 `task_node` 启动后会等待以下条件：
@@ -613,13 +613,13 @@ ros2 run tf2_ros tf2_echo world dog_camera_link
 
 ## 7. 关键参数
 
-这些参数都从传入 `task_node` 的参数文件读取。当前 `run_arm.sh` 默认只加载 `src/arm2_task/config/params.yaml`。
+这些参数都从传入 `task_node` 的参数文件读取。当前 `run_arm.sh` 默认给 `task_node` 加载 `src/arm2_task/config/task_params.yaml`。
 
 ### 7.1 启动与服务必选项
 
 | 参数 | 默认值 | 作用 |
 |---|---|---|
-| `task.manual_mode` | 当前 `params.yaml` 为 `true` | `true` 进入终端菜单；`false` 等待 `/arm/mission_event` |
+| `task.manual_mode` | 当前 `task_params.yaml` 为 `false`，`run_arm.sh` 会按 nav/terminal 覆盖 | `true` 进入终端菜单；`false` 等待 `/arm/mission_event` |
 | `task.require_payload_service` | `false` | 是否把负载相关服务作为强依赖 |
 | `task.require_suction_service` | `false` | 是否把吸盘服务作为强依赖 |
 | `task.payload_service` | `set_payload_state` | `SetPayloadState` 服务名 |

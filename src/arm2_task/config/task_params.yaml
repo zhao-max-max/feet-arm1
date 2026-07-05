@@ -2,12 +2,30 @@
 /**:
   ros__parameters:
 
-    # 预设动作点 (角度制)
+    # task_node 参数。bash run_arm.sh 会把本文件传给 task_node。
+    # 这里仅保留 task_node.cpp 和 task_node.launch.py 实际读取的参数。
+
+    urdf_path: urdf/arm2.urdf
+
+    # task_node 自己也会做 IK，因此几何参数需要在任务参数文件里显式维护。
+    robot_geometry:
+      l1: 0.0845
+      l2: 0.350005
+      l3: 0.243441
+      l4: 0.046
+
+    # task_node 发送 move_joint goal 时写入的默认速度、加速度和 blend 半径。
+    trajectory_planner:
+      max_velocity: 1.0
+      max_acceleration: 2.0
+      dist_threshold: 0.10
+
+    # 预设动作点，单位为角度。
     presets:
-      load:     [0.0,  90.0, -80.0, -90.0, 0.0]   # 俯瞰姿态，相机朝正下方
-      look_out: [0.0, 90.0, -145.0, 0.0,  0.0]    # 瞭望姿态，相机朝斜下方
-      reset:    [0.0, 175.0, -170.0, 10.0, 0.0]    # 收回/待机
-      carry:    [0.0, 175.0, -140.0, 10.0, 0.0]    # 持箱收回姿态（带负载）
+      load: [0.0, 90.0, -80.0, -90.0, 0.0]
+      look_out: [0.0, 90.0, -145.0, 0.0, 0.0]
+      reset: [0.0, 175.0, -170.0, 10.0, 0.0]
+      carry: [0.0, 175.0, -140.0, 10.0, 0.0]
 
     task:
       require_payload_service: false
@@ -17,70 +35,74 @@
         has_load: true
         mass: 0.5
         com: [0.0, 0.0, 0.2219]
-      manual_mode: false        # false = nav 触发模式（默认），true = 菜单交互模式（调试用）
+      # run_arm.sh 的 nav/terminal 模式会覆盖这个值；这里保留默认 nav。
+      manual_mode: false
 
+    # pickup 参数。
+    # nav 模式 pickup 走 get_pick_pos / nav_mock_ui mock vision；返回目标 z 后，
+    # 还会继续叠加 object_height / tool_offset_z / tool_tip_length。
     task_step6:
-      grasp_pitch:       -1.57    # 抓取末端俯仰角 (rad)
-      tool_pitch_offset:  0.25    # 实机 pitch 标定偏移 (rad)，正值=吸盘往前倾
-      tool_yaw_offset:    0.0     # 实机 yaw 标定偏移 (rad)，正值=逆时针(从上往下看)
-      object_height:      0.005   # 物体高度，决定末端 Z 落点 (m)
-      pre_grasp_offset:   0.10    # 预抓取悬停高度偏移 (m)
-      tool_offset_x:      0.0
-      tool_offset_y:      0.0
-      tool_offset_z:      0.0    # 工具坐标系偏移（补偿 base_link Z 偏置）
-      tool_tip_length:    0.0     # 吸盘接触面到 Link_5 origin 的距离 (m)
-      pick_object_name:  "box"    # 传给 get_pick_pos 服务的物体名
-      use_mock_target:    false   # true 时 case6 用固定坐标（调试用）
-      mock_x:             0.35
-      mock_y:             0.0
-      mock_z:             0.12
+      grasp_pitch: -1.57
+      tool_pitch_offset: 0.25
+      tool_yaw_offset: 0.0
+      object_height: 0.005
+      pre_grasp_offset: 0.10
+      tool_offset_x: 0.0
+      tool_offset_y: 0.0
+      tool_offset_z: 0.0
+      tool_tip_length: 0.0
+      pick_object_name: "box"
+      use_mock_target: false
+      mock_x: 0.35
+      mock_y: 0.0
+      mock_z: 0.12
 
+    # place 共用参数。nav direct_height 路径把 retreat_offset 作为 reset 前的中间撤离路点。
     task_place:
-      pre_place_offset:   0.12    # 预放置悬停高度偏移 (m)
-      retreat_offset:     0.15    # 放置后垂直后退距离 (m)
+      pre_place_offset: 0.12
+      retreat_offset: 0.15
 
+    # nav place 使用 hover_height 作为放置前悬停高度；contact_offset 仅 frame place 路径使用。
     task_place_frame:
-      hover_height:       0.10
-      contact_offset:     0.45
-      frame_name:         "target_frame"
-      roll_sign:          1.0
-      use_mock_target:    false
-      mock_x:             0.35
-      mock_y:             0.0
-      mock_z:             0.0
-      mock_yaw:           0.0
+      hover_height: 0.10
+      contact_offset: 0.45
+      frame_name: "target_frame"
+      roll_sign: 1.0
+      use_mock_target: false
+      mock_x: 0.35
+      mock_y: 0.0
+      mock_z: 0.0
+      mock_yaw: 0.0
 
     task_stack:
-      hover_height:       0.05
-      contact_offset:     0.25
-      stack_service:      "get_stack_pos"
-      roll_sign:          1.0
-      use_mock_target:    false
-      mock_x:             0.35
-      mock_y:             0.0
-      mock_z:             0.1
-      mock_yaw:           0.0
+      hover_height: 0.05
+      contact_offset: 0.25
+      stack_service: "get_stack_pos"
+      roll_sign: 1.0
+      use_mock_target: false
+      mock_x: 0.35
+      mock_y: 0.0
+      mock_z: 0.1
+      mock_yaw: 0.0
 
     task_nav:
-      state_topic:        /navigation/state
-      task_points_topic:  /navigation/task_points
-      place_height:       -0.20
-      # 机器狗/导航 base_link 到雷达坐标系的静态外参。
-      # 等价命令：
-      # ros2 run tf2_ros static_transform_publisher --x 0.127 --y 0 --z 0 --roll 0 --pitch 0 --yaw -1.570796 --frame-id base_link --child-frame-id lidar_link
+      state_topic: /navigation/state
+      task_points_topic: /navigation/task_points
+      place_height: -0.10
+      # 机器狗/导航 base_link -> lidar_link 静态外参。
       lidar_extrinsics:
-        enabled:          true
-        prefer_tf:        true
-        parent_frame:     base_link
-        child_frame:      lidar_link
-        translation:      [0.127, 0.0, 0.0]          # xyz, m
-        rotation_rpy:     [0.0, 0.0, -1.570796]      # roll/pitch/yaw, rad
-      # 调试阶段手动指定的地图任务点。nav 包是外部依赖，这里只维护 arm2_task 本地副本。
-      ids:                [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
-      x:                  [-1.251139, -0.428469, 0.391736, 1.223170, 1.227952, 0.405132, -0.439627, -1.260851, -1.184853, -0.390241, 0.375382, 1.181787]
-      y:                  [2.427514, 2.425345, 2.424333, 2.419070, 1.589189, 1.587631, 1.587582, 1.589028, 4.910509, 4.901606, 4.902796, 4.901133]
-      yaw:                [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        enabled: true
+        prefer_tf: true
+        parent_frame: base_link
+        child_frame: lidar_link
+        translation: [0.127, 0.0, 0.0]
+        rotation_rpy: [0.0, 0.0, -1.570796]
+      # 调试阶段手动指定的地图任务点，作为 nav topic 缺失时的本地副本。
+      ids: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+      x: [-1.251139, -0.428469, 0.391736, 1.223170, 1.227952, 0.405132, -0.439627, -1.260851, -1.184853, -0.390241, 0.375382, 1.181787]
+      y: [2.427514, 2.425345, 2.424333, 2.419070, 1.589189, 1.587631, 1.587582, 1.589028, 4.910509, 4.901606, 4.902796, 4.901133]
+      yaw: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
     visual_align:
-      align_threshold:    0.005   # Phase-2 对齐收敛阈值：末端与目标 XY 误差 (m)
-      max_iters:          5       # Phase-2 最大迭代次数
+      align_threshold: 0.005
+      max_iters: 5

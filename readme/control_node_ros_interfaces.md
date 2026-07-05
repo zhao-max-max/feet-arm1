@@ -2,7 +2,7 @@
 
 本文档按当前 `src/arm2_task/src/control_node.cpp` 的实现整理，说明 `controller_node` 直接创建、订阅、发布或提供的 ROS2 接口，以及这些接口的使用方式与作用。
 
-> 注意：本文只描述当前 `control_node.cpp` 实际使用的接口。`src/arm2_task/config/params.yaml` 和 `control_params.yaml` 中有一些历史/备用参数并未被当前 `control_node` 读取，文末已单独标出。
+> 注意：本文只描述当前 `control_node.cpp` 实际使用的接口。`bash run_arm.sh` 会把 `src/arm2_task/config/params.yaml` 传给 `control_node`。
 
 ## 1. 节点与启动方式
 
@@ -289,7 +289,7 @@ ros2 service call /set_controller_mode robot_msgs/srv/SetControllerMode "{mode: 
 ros2 service call /set_controller_mode robot_msgs/srv/SetControllerMode "{mode: idle}"
 ```
 
-注意：`control_params.yaml` 中虽然有 `teach_pendant`、`teach_drag`，但当前 `control_node.cpp` 的 `load_all_gains()` 只加载 `idle/gravity_comp/moving/loaded`。直接调用 `teach_pendant` 或 `teach_drag` 会返回未知模式。
+注意：当前 `control_node.cpp` 的 `load_all_gains()` 只加载 `idle/gravity_comp/moving/loaded`。直接调用 `teach_pendant` 或 `teach_drag` 会返回未知模式。
 
 ### 3.2 提供：`/get_payload_estimate`
 
@@ -530,7 +530,7 @@ current_gains_ = gains.gravity_comp
 
 ## 6. 当前容易误解的配置项
 
-以下参数在 `params.yaml` 或 `control_params.yaml` 中存在，但当前 `control_node.cpp` 没有读取或没有完整使用：
+以下参数如果出现在自定义控制参数文件中，当前 `control_node.cpp` 也不会读取或不会完整使用：
 
 | 参数/配置 | 当前情况 |
 |---|---|
@@ -543,7 +543,7 @@ current_gains_ = gains.gravity_comp
 | `inverse_dynamics.command_velocity_limits` | 当前不读取 |
 | `inverse_dynamics.command_torque_limits` | 当前不读取 |
 | `trajectory_planner.*` | 当前 `control_node` 基本不读取 |
-| `gains.teach_pendant` / `gains.teach_drag` | 配置中可能存在，但当前代码没有加载为可切换模式 |
+| `gains.teach_pendant` / `gains.teach_drag` | 当前代码没有加载为可切换模式 |
 
 ## 7. 接口关系总览
 
