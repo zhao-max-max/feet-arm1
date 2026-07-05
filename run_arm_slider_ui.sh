@@ -14,6 +14,7 @@ DRIVER_PID=""
 CONTROL_PID=""
 UI_PID=""
 CLEANUP_RUNNING=0
+LOG_DIR=""
 
 usage() {
   cat <<USAGE
@@ -49,27 +50,58 @@ source_setup() {
 
 launch_in_group() {
   local __var="$1"
-  shift
-  setsid "$@" &
+  local logfile="$2"
+  shift 2
+  setsid bash -c '"$@" 2>&1 | tee "$0"' "$logfile" "$@" &
   local pid=$!
   printf -v "$__var" '%s' "$pid"
+}
+
+# Recursively collect all descendant PIDs (depth-first, leaves first).
+collect_descendants() {
+  local pid="$1"
+  local children
+  children=$(pgrep -P "$pid" 2>/dev/null || true)
+  for child in $children; do
+    collect_descendants "$child"
+  done
+  echo "$pid"
 }
 
 stop_process_group() {
   local pid="$1"
   local name="$2"
   [[ -n "$pid" ]] || return 0
-  echo "[run_arm_slider_ui] stopping $name (pgid=$pid)..."
-  kill -TERM -- "-$pid" 2>/dev/null || true
+  kill -0 "$pid" 2>/dev/null || return 0
+
+  # Collect the entire process subtree BEFORE sending any signal,
+  # so we don't lose track of children after the launch parent exits.
+  local tree
+  tree=$(collect_descendants "$pid")
+
+  echo "[run_arm_slider_ui] stopping $name (pids: $tree)..."
+
+  # Send SIGINT to every process in the tree so each node runs its own
+  # graceful shutdown (e.g. dm_motor_disable in the driver destructor).
+  for p in $tree; do
+    kill -INT "$p" 2>/dev/null || true
+  done
+
+  # Wait up to 3 s for everything to exit cleanly.
   for _ in $(seq 1 30); do
-    kill -0 -- "-$pid" 2>/dev/null || {
-      wait "$pid" 2>/dev/null || true
-      return 0
-    }
+    local any_alive=0
+    for p in $tree; do
+      kill -0 "$p" 2>/dev/null && { any_alive=1; break; }
+    done
+    (( any_alive )) || { wait "$pid" 2>/dev/null || true; return 0; }
     sleep 0.1
   done
-  echo "[run_arm_slider_ui] WARN: $name did not stop after SIGTERM; sending SIGKILL"
-  kill -KILL -- "-$pid" 2>/dev/null || true
+
+  # Anything still alive after graceful window gets SIGKILL.
+  echo "[run_arm_slider_ui] WARN: $name did not stop cleanly; sending SIGKILL"
+  for p in $tree; do
+    kill -KILL "$p" 2>/dev/null || true
+  done
   wait "$pid" 2>/dev/null || true
 }
 
@@ -154,6 +186,8 @@ fi
 source_setup "$WS_SETUP"
 trap cleanup EXIT INT TERM
 cd "$SCRIPT_DIR"
+LOG_DIR="$WS_DIR/logs/slider_ui_$(date +%Y%m%d_%H%M%S)"
+mkdir -p "$LOG_DIR"
 
 echo ""
 echo "╔══════════════════════════════════════════════╗"
@@ -166,14 +200,14 @@ echo "  ready timeout  : ${READY_TIMEOUT}s"
 echo ""
 
 echo "[run_arm_slider_ui] launching dm_motor_sdk_ros driver..."
-launch_in_group DRIVER_PID \
+launch_in_group DRIVER_PID "$LOG_DIR/driver.log" \
   ros2 launch dm_motor_sdk_ros dm_motor_robot_driver.launch.py \
     params_path:="$DRIVER_PARAMS_FILE"
 
 wait_for_ready "$READY_TIMEOUT"
 
 echo "[run_arm_slider_ui] launching control_node..."
-launch_in_group CONTROL_PID \
+launch_in_group CONTROL_PID "$LOG_DIR/control_node.log" \
   ros2 launch arm2_task control_node.launch.py \
     params_path:="$CONTROL_PARAMS_FILE"
 
@@ -181,7 +215,7 @@ launch_in_group CONTROL_PID \
 sleep 1
 
 echo "[run_arm_slider_ui] launching joint_slider_ui..."
-launch_in_group UI_PID \
+launch_in_group UI_PID "$LOG_DIR/joint_slider_ui.log" \
   ros2 launch debug_tool joint_slider_ui.launch.py
 
 echo ""
@@ -189,6 +223,7 @@ echo "[run_arm_slider_ui] all nodes started. Press Ctrl+C to stop everything."
 echo "  driver       pid: $DRIVER_PID"
 echo "  control_node pid: $CONTROL_PID"
 echo "  slider_ui    pid: $UI_PID"
+echo "  logs         dir: $LOG_DIR"
 echo ""
 
 wait -n "$DRIVER_PID" "$CONTROL_PID" "$UI_PID"
