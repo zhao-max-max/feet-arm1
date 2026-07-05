@@ -245,6 +245,7 @@ public:
     pose_x_ = declare_parameter<double>("initial_pose_x", 0.0);
     pose_y_ = declare_parameter<double>("initial_pose_y", 0.0);
     pose_yaw_rad_ = declare_parameter<double>("initial_pose_yaw_rad", 0.0);
+    mock_pick_service_enabled_ = declare_parameter<bool>("mock_pick_service_enabled", false);
     vision_override_enabled_ = declare_parameter<bool>("vision_override_enabled", false);
     vision_pick_z_ = declare_parameter<double>("vision_pick_z", 0.12);
     vision_lidar_in_arm_x_ = declare_parameter<double>("vision_lidar_in_arm_x", 0.127);
@@ -269,54 +270,56 @@ public:
       create_client<navigation::srv::MissionCommand>(arm_mission_service_);
     arm_debug_state_client_ =
       create_client<navigation::srv::MissionCommand>(arm_debug_state_service_);
-    pick_service_server_ = create_service<robot_msgs::srv::GetPickPos>(
-      pick_service_name_,
-      [this](
-        const robot_msgs::srv::GetPickPos::Request::SharedPtr request,
-        robot_msgs::srv::GetPickPos::Response::SharedPtr response)
-      {
-        response->success = false;
-        const std::string object_name = request ? request->object_name : std::string("<null>");
-        geometry_msgs::msg::PoseStamped pick_pose;
-        int task_point_id = 0;
-        double lidar_distance = 0.0;
-        std::string status;
-
+    if (mock_pick_service_enabled_) {
+      pick_service_server_ = create_service<robot_msgs::srv::GetPickPos>(
+        pick_service_name_,
+        [this](
+          const robot_msgs::srv::GetPickPos::Request::SharedPtr request,
+          robot_msgs::srv::GetPickPos::Response::SharedPtr response)
         {
-          std::lock_guard<std::mutex> lock(mutex_);
-          if (!request) {
-            status = "null request";
-          } else if (!compute_mock_pick_pose_locked(&pick_pose, &task_point_id, &lidar_distance, &status)) {
-            // status filled by helper.
-          } else {
-            response->success = true;
-            response->pick_pose = pick_pose;
+          response->success = false;
+          const std::string object_name = request ? request->object_name : std::string("<null>");
+          geometry_msgs::msg::PoseStamped pick_pose;
+          int task_point_id = 0;
+          double lidar_distance = 0.0;
+          std::string status;
 
-            std::ostringstream out;
-            out << "ok task_id=" << task_point_id
-                << " lidar_dist=" << std::fixed << std::setprecision(3) << lidar_distance
-                << " world=" << format_xyz(
-              pick_pose.pose.position.x,
-              pick_pose.pose.position.y,
-              pick_pose.pose.position.z);
-            status = out.str();
+          {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (!request) {
+              status = "null request";
+            } else if (!compute_mock_pick_pose_locked(&pick_pose, &task_point_id, &lidar_distance, &status)) {
+              // status filled by helper.
+            } else {
+              response->success = true;
+              response->pick_pose = pick_pose;
+
+              std::ostringstream out;
+              out << "ok task_id=" << task_point_id
+                  << " lidar_dist=" << std::fixed << std::setprecision(3) << lidar_distance
+                  << " world=" << format_xyz(
+                pick_pose.pose.position.x,
+                pick_pose.pose.position.y,
+                pick_pose.pose.position.z);
+              status = out.str();
+            }
+            last_pick_call_status_ = status;
           }
-          last_pick_call_status_ = status;
-        }
 
-        if (!response->success) {
-          append_log("mock get_pick_pos: object=" + object_name + " -> fail: " + status);
-          return;
-        }
+          if (!response->success) {
+            append_log("mock get_pick_pos: object=" + object_name + " -> fail: " + status);
+            return;
+          }
 
-        append_log(
-          "mock get_pick_pos: object=" + object_name +
-          " -> task_id=" + std::to_string(task_point_id) +
-          " world=" + format_xyz(
-            response->pick_pose.pose.position.x,
-            response->pick_pose.pose.position.y,
-            response->pick_pose.pose.position.z));
-      });
+          append_log(
+            "mock get_pick_pos: object=" + object_name +
+            " -> task_id=" + std::to_string(task_point_id) +
+            " world=" + format_xyz(
+              response->pick_pose.pose.position.x,
+              response->pick_pose.pose.position.y,
+              response->pick_pose.pose.position.z));
+        });
+    }
     nav_arm_event_server_ = create_service<navigation::srv::StringCommand>(
       nav_arm_event_service_,
       [this](
@@ -906,6 +909,7 @@ private:
   rclcpp::Publisher<navigation::msg::MapPointArray>::SharedPtr nav_task_points_pub_;
   rclcpp::Client<navigation::srv::MissionCommand>::SharedPtr arm_mission_client_;
   rclcpp::Client<navigation::srv::MissionCommand>::SharedPtr arm_debug_state_client_;
+  bool mock_pick_service_enabled_{false};
   rclcpp::Service<robot_msgs::srv::GetPickPos>::SharedPtr pick_service_server_;
   rclcpp::Service<navigation::srv::StringCommand>::SharedPtr nav_arm_event_server_;
   rclcpp::Subscription<navigation::srv::MissionCommand::Request>::SharedPtr mission_request_sub_;

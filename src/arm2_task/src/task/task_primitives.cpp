@@ -249,6 +249,8 @@ bool TaskPrimitives::do_look_out(const geometry_msgs::msg::Pose & target)
   detail << "target_x=" << target.position.x << ",target_y=" << target.position.y;
   publish_timing_event(node_, timing_event_pub_, "action", "look_out", "begin", detail.str());
 
+  request_mode_switch("moving");
+
   if (!presets_->count("look_out")) {
     RCLCPP_ERROR(node_->get_logger(), "Preset 'look_out' not found!");
     publish_timing_event(
