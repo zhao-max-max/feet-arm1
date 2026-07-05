@@ -161,3 +161,41 @@ Interaction notes:
 - edit pose, task points, and mission fields from the right panel
 - enable `Mock Vision` to make `get_pick_pos` return the nearest task point converted into arm `world` coordinates
 - incoming arm callbacks are answered automatically using the configured response fields
+
+## Nav Arm State UI
+
+`nav_arm_state_ui` is a dedicated Qt tool for switching the arm nav debug state without publishing mock nav topics or creating nav/vision debug services.
+
+It provides:
+
+- a client for `/arm/debug_state_command`
+- buttons for `idle`, `lookout`, `holding`, and `carry_holding`
+- a manual `task_index` field used by `lookout`
+- a small status/log panel showing service readiness and the last response
+
+Run:
+
+```bash
+source install/setup.bash
+ros2 run debug_tool nav_arm_state_ui
+```
+
+Or through launch:
+
+```bash
+ros2 launch debug_tool nav_arm_state_ui.launch.py
+```
+
+Useful parameters:
+
+```bash
+ros2 run debug_tool nav_arm_state_ui --ros-args \
+  -p arm_debug_state_service:=/arm/debug_state_command \
+  -p initial_task_index:=1
+```
+
+Interaction notes:
+
+- `Set IDLE`, `Set HOLDING`, and `Carry + HOLDING` do not require nav pose input
+- `Move LOOKOUT` needs a valid `task_index`, or `0` to reuse the cached ready target if one exists
+- unlike `nav_mock_ui`, this tool does not publish `/navigation/state` or `/navigation/task_points`

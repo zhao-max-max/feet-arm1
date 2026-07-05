@@ -2,10 +2,15 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 ROS_SETUP="/opt/ros/humble/setup.bash"
 WS_SETUP="$SCRIPT_DIR/install/setup.bash"
 DEFAULT_PARAMS_FILE="$SCRIPT_DIR/src/arm2_task/config/params.yaml"
 DEFAULT_DRIVER_PARAMS_FILE="$SCRIPT_DIR/src/dm_motor_sdk_ros/config/dm_motor_robot_driver.yaml"
+ROS_DOMAIN_ENV_FILE="${ROS_DOMAIN_ENV_FILE:-$REPO_DIR/.ros_domain_id.env}"
+
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/../common_ros_domain.sh"
 
 PARAMS_FILE="$DEFAULT_PARAMS_FILE"
 DRIVER_PARAMS_FILE="$DEFAULT_DRIVER_PARAMS_FILE"
@@ -154,6 +159,8 @@ source_setup() {
     set -u
 }
 
+source_repo_ros_domain_env "${REPO_DIR}"
+
 EXTRA_ROS_ARGS=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -217,6 +224,7 @@ record_existing_ros2_daemons
 
 echo "[INFO] arm2_task params: ${PARAMS_FILE}"
 echo "[INFO] driver params: ${DRIVER_PARAMS_FILE}"
+echo "[INFO] ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-<unset>}"
 echo "[INFO] Launching dm_motor_sdk_ros driver..."
 launch_in_group DRIVER_PID ros2 launch dm_motor_sdk_ros dm_motor_robot_driver.launch.py params_path:="${DRIVER_PARAMS_FILE}"
 

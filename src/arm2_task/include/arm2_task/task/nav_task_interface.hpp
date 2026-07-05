@@ -25,6 +25,8 @@ public:
   struct Config
   {
     double place_height{0.28};
+    bool radar_pick_fallback_enabled{true};
+    double radar_pick_fallback_target_z{0.12};
   };
 
   NavTaskInterface(
@@ -64,6 +66,7 @@ private:
     const char * context);
   bool do_ready_sequence(const MissionCommand & command);
   bool do_grasp_sequence(const MissionCommand & command);
+  bool do_radar_pick_fallback(const MissionCommand & command);
   bool do_place_sequence(const MissionCommand & command);
   bool execute_mission_command(const MissionCommand & command);
   void cache_active_ready_command(const MissionCommand & command);

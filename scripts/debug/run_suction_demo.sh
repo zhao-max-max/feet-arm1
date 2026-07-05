@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 WS_DIR="/home/zyy/task/arm/feet-arm2-main"
 SERIAL_PORT="${1:-/dev/esp32_suction_c3}"
 SERVICE_NAME="${2:-set_suction}"
 SERVER_PID=""
+
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/../common_ros_domain.sh"
+source_repo_ros_domain_env "${REPO_DIR}"
 
 cleanup() {
   if [[ -n "${SERVER_PID}" ]] && kill -0 "${SERVER_PID}" 2>/dev/null; then
@@ -36,6 +42,7 @@ source "${WS_DIR}/install/setup.bash"
 set -u
 
 echo "Starting suction service node on ${SERIAL_PORT}..."
+echo "Using ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-<unset>}"
 ros2 run suction_serial_bridge suction_service_node \
   --ros-args \
   -p serial_port:="${SERIAL_PORT}" \

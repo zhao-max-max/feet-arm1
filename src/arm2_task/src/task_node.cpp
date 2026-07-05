@@ -129,6 +129,10 @@ public:
     const auto nav_task_points_topic =
         this->declare_parameter("task_nav.task_points_topic", std::string("/navigation/task_points"));
     nav_place_height_ = this->declare_parameter("task_nav.place_height", 0.28);
+    nav_radar_pick_fallback_enabled_ =
+        this->declare_parameter("task_nav.radar_pick_fallback.enabled", true);
+    nav_radar_pick_fallback_target_z_ =
+        this->declare_parameter("task_nav.radar_pick_fallback.target_z", 0.12);
     const auto nav_lidar_tf_enabled =
         this->declare_parameter("task_nav.lidar_extrinsics.enabled", true);
     const auto nav_lidar_tf_prefer_tf =
@@ -342,6 +346,8 @@ public:
 
     arm2_task::task::NavTaskInterface::Config nav_interface_config;
     nav_interface_config.place_height = nav_place_height_;
+    nav_interface_config.radar_pick_fallback_enabled = nav_radar_pick_fallback_enabled_;
+    nav_interface_config.radar_pick_fallback_target_z = nav_radar_pick_fallback_target_z_;
     nav_interface_ = std::make_unique<arm2_task::task::NavTaskInterface>(
         this, task_sequences_.get(), task_primitives_.get(), nav_pose_tracker_.get(),
         &is_running_, nav_interface_config);
@@ -541,6 +547,8 @@ private:
   double stack_mock_yaw_{0.0};
 
   double nav_place_height_{0.28};
+  bool nav_radar_pick_fallback_enabled_{true};
+  double nav_radar_pick_fallback_target_z_{0.12};
 
   // Presets
   std::map<std::string, Eigen::VectorXd> presets_;

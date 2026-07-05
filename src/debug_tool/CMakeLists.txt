@@ -53,6 +53,23 @@ install(TARGETS
   DESTINATION lib/${PROJECT_NAME}
 )
 
+add_executable(nav_arm_state_ui
+  src/nav_arm_state_ui.cpp
+)
+target_compile_features(nav_arm_state_ui PUBLIC cxx_std_17)
+ament_target_dependencies(nav_arm_state_ui
+  navigation
+  rclcpp
+)
+target_link_libraries(nav_arm_state_ui
+  Qt5::Widgets
+)
+
+install(TARGETS
+  nav_arm_state_ui
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 add_executable(joint_slider_ui
   src/joint_slider_ui.cpp
 )

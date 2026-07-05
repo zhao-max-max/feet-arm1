@@ -9,6 +9,10 @@ DRIVER_PARAMS_FILE="${DRIVER_PARAMS_FILE:-$WS_DIR/src/dm_motor_sdk_ros/config/dm
 CONTROL_PARAMS_FILE="${CONTROL_PARAMS_FILE:-$WS_DIR/src/arm2_task/config/params.yaml}"
 READY_TIMEOUT="${READY_TIMEOUT:-15}"
 AUTO_BUILD="${AUTO_BUILD:-false}"
+ROS_DOMAIN_ENV_FILE="${ROS_DOMAIN_ENV_FILE:-$WS_DIR/.ros_domain_id.env}"
+
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/scripts/common_ros_domain.sh"
 
 DRIVER_PID=""
 CONTROL_PID=""
@@ -47,6 +51,8 @@ source_setup() {
   source "$1"
   set -u
 }
+
+source_repo_ros_domain_env "$WS_DIR"
 
 launch_in_group() {
   local __var="$1"
@@ -197,6 +203,7 @@ echo "  workspace      : $WS_DIR"
 echo "  driver params  : $DRIVER_PARAMS_FILE"
 echo "  control params : $CONTROL_PARAMS_FILE"
 echo "  ready timeout  : ${READY_TIMEOUT}s"
+echo "  ros_domain_id  : ${ROS_DOMAIN_ID:-<unset>}"
 echo ""
 
 echo "[run_arm_slider_ui] launching dm_motor_sdk_ros driver..."
