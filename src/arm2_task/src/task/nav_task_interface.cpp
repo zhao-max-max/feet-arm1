@@ -454,10 +454,17 @@ bool NavTaskInterface::do_grasp_sequence(const MissionCommand & command)
   clear_active_ready_command();
 
   if (!sequences_->grasp_from_current_view()) {
-    publish_timing_event(
-      node_, timing_event_pub_, "mission", "pickup_sequence", "end",
-      detail.str() + ",ok=0,reason=grasp_failed");
-    return false;
+    RCLCPP_WARN(
+      node_->get_logger(),
+      "[nav] Visual pickup failed for task_index=%u; trying radar fallback=%s.",
+      command.task_index,
+      config_.radar_pick_fallback_enabled ? "enabled" : "disabled");
+    if (!do_radar_pick_fallback(command)) {
+      publish_timing_event(
+        node_, timing_event_pub_, "mission", "pickup_sequence", "end",
+        detail.str() + ",ok=0,reason=grasp_failed");
+      return false;
+    }
   }
 
   rclcpp::sleep_for(500ms);
@@ -474,6 +481,69 @@ bool NavTaskInterface::do_grasp_sequence(const MissionCommand & command)
   publish_timing_event(
     node_, timing_event_pub_, "mission", "pickup_sequence", "end",
     detail.str() + ",ok=1");
+  return true;
+}
+
+bool NavTaskInterface::do_radar_pick_fallback(const MissionCommand & command)
+{
+  std::ostringstream detail;
+  detail << "task_index=" << command.task_index
+         << ",point_id=" << command.point_id
+         << ",enabled=" << timing_bool(config_.radar_pick_fallback_enabled);
+  publish_timing_event(
+    node_, timing_event_pub_, "mission", "radar_pick_fallback", "begin", detail.str());
+
+  if (!config_.radar_pick_fallback_enabled) {
+    publish_timing_event(
+      node_, timing_event_pub_, "mission", "radar_pick_fallback", "end",
+      detail.str() + ",ok=0,reason=disabled");
+    return false;
+  }
+
+  arm2_task::task::RelativePlanarPose relative_pose;
+  if (!compute_command_relative_pose(command, &relative_pose)) {
+    RCLCPP_ERROR(
+      node_->get_logger(),
+      "[nav] Radar pickup fallback failed: unable to compute arm-relative pose for task_index=%u.",
+      command.task_index);
+    publish_timing_event(
+      node_, timing_event_pub_, "mission", "radar_pick_fallback", "end",
+      detail.str() + ",ok=0,reason=relative_pose_failed");
+    return false;
+  }
+
+  geometry_msgs::msg::Pose fallback_pose;
+  fallback_pose.position.x = relative_pose.x;
+  fallback_pose.position.y = relative_pose.y;
+  fallback_pose.position.z = config_.radar_pick_fallback_target_z;
+  fallback_pose.orientation.x = 0.0;
+  fallback_pose.orientation.y = 0.0;
+  fallback_pose.orientation.z = std::sin(relative_pose.yaw / 2.0);
+  fallback_pose.orientation.w = std::cos(relative_pose.yaw / 2.0);
+
+  RCLCPP_WARN(
+    node_->get_logger(),
+    "[nav] Radar pickup fallback target_id=%d arm=(x=%.3f, y=%.3f, z=%.3f, yaw=%.3f rad).",
+    relative_pose.task_pose.id,
+    fallback_pose.position.x,
+    fallback_pose.position.y,
+    fallback_pose.position.z,
+    relative_pose.yaw);
+
+  if (!sequences_->grasp_pose(fallback_pose, false)) {
+    publish_timing_event(
+      node_, timing_event_pub_, "mission", "radar_pick_fallback", "end",
+      detail.str() + ",ok=0,reason=fallback_grasp_failed,target_id=" +
+      std::to_string(relative_pose.task_pose.id));
+    return false;
+  }
+
+  publish_timing_event(
+    node_, timing_event_pub_, "mission", "radar_pick_fallback", "end",
+    detail.str() + ",ok=1,target_id=" + std::to_string(relative_pose.task_pose.id) +
+    ",rel_x=" + std::to_string(relative_pose.x) +
+    ",rel_y=" + std::to_string(relative_pose.y) +
+    ",target_z=" + std::to_string(fallback_pose.position.z));
   return true;
 }
 
