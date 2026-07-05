@@ -36,6 +36,7 @@
 #include <QSignalBlocker>
 #include <QSpinBox>
 #include <QSplitter>
+#include <QTabWidget>
 #include <QStringList>
 #include <QTableWidget>
 #include <QTableWidgetItem>
@@ -50,6 +51,7 @@
 #include "navigation/srv/mission_command.hpp"
 #include "navigation/srv/string_command.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "robot_msgs/srv/get_pick_pos.hpp"
 
 using namespace std::chrono_literals;
 
@@ -104,6 +106,13 @@ std::string format_xy(double x, double y)
   return out.str();
 }
 
+std::string format_xyz(double x, double y, double z)
+{
+  std::ostringstream out;
+  out << std::fixed << std::setprecision(3) << "(" << x << ", " << y << ", " << z << ")";
+  return out.str();
+}
+
 std::string format_pose(double x, double y, double yaw_rad)
 {
   std::ostringstream out;
@@ -142,6 +151,17 @@ double clamp_hz(double hz)
 {
   return std::max(0.1, std::min(100.0, hz));
 }
+
+double normalize_angle(double angle)
+{
+  while (angle > M_PI) {
+    angle -= 2.0 * M_PI;
+  }
+  while (angle < -M_PI) {
+    angle += 2.0 * M_PI;
+  }
+  return angle;
+}
 }  // namespace
 
 class NavMockRosNode : public rclcpp::Node
@@ -160,10 +180,16 @@ public:
     std::vector<TaskPointState> task_points;
     bool mission_service_ready{false};
     bool debug_state_service_ready{false};
+    bool vision_override_enabled{false};
+    double vision_pick_z{0.12};
+    double vision_lidar_in_arm_x{0.127};
+    double vision_lidar_in_arm_y{0.0};
+    double vision_lidar_in_arm_yaw_rad{-1.570796};
     bool arm_event_response_success{true};
     std::string arm_event_response_message{"ack"};
     std::string last_mission_call_status{"idle"};
     std::string last_debug_state_call_status{"idle"};
+    std::string last_pick_call_status{"idle"};
     bool has_last_arm_event_request{false};
     std::string last_arm_event_request;
     double last_arm_event_request_age_sec{-1.0};
@@ -197,6 +223,8 @@ public:
       declare_parameter<std::string>("arm_debug_state_service", "/arm/debug_state_command");
     nav_arm_event_service_ =
       declare_parameter<std::string>("nav_arm_event_service", "/navigation/arm_event");
+    pick_service_name_ =
+      declare_parameter<std::string>("pick_service_name", "get_pick_pos");
     nav_mission_request_topic_ =
       declare_parameter<std::string>("nav_mission_request_topic", "/debug/nav/mission_request");
     nav_mission_response_topic_ =
@@ -217,6 +245,12 @@ public:
     pose_x_ = declare_parameter<double>("initial_pose_x", 0.0);
     pose_y_ = declare_parameter<double>("initial_pose_y", 0.0);
     pose_yaw_rad_ = declare_parameter<double>("initial_pose_yaw_rad", 0.0);
+    vision_override_enabled_ = declare_parameter<bool>("vision_override_enabled", false);
+    vision_pick_z_ = declare_parameter<double>("vision_pick_z", 0.12);
+    vision_lidar_in_arm_x_ = declare_parameter<double>("vision_lidar_in_arm_x", 0.127);
+    vision_lidar_in_arm_y_ = declare_parameter<double>("vision_lidar_in_arm_y", 0.0);
+    vision_lidar_in_arm_yaw_rad_ =
+      declare_parameter<double>("vision_lidar_in_arm_yaw_rad", -1.570796);
     arm_event_response_success_ =
       declare_parameter<bool>("arm_event_response_success", true);
     arm_event_response_message_ =
@@ -235,6 +269,54 @@ public:
       create_client<navigation::srv::MissionCommand>(arm_mission_service_);
     arm_debug_state_client_ =
       create_client<navigation::srv::MissionCommand>(arm_debug_state_service_);
+    pick_service_server_ = create_service<robot_msgs::srv::GetPickPos>(
+      pick_service_name_,
+      [this](
+        const robot_msgs::srv::GetPickPos::Request::SharedPtr request,
+        robot_msgs::srv::GetPickPos::Response::SharedPtr response)
+      {
+        response->success = false;
+        const std::string object_name = request ? request->object_name : std::string("<null>");
+        geometry_msgs::msg::PoseStamped pick_pose;
+        int task_point_id = 0;
+        double lidar_distance = 0.0;
+        std::string status;
+
+        {
+          std::lock_guard<std::mutex> lock(mutex_);
+          if (!request) {
+            status = "null request";
+          } else if (!compute_mock_pick_pose_locked(&pick_pose, &task_point_id, &lidar_distance, &status)) {
+            // status filled by helper.
+          } else {
+            response->success = true;
+            response->pick_pose = pick_pose;
+
+            std::ostringstream out;
+            out << "ok task_id=" << task_point_id
+                << " lidar_dist=" << std::fixed << std::setprecision(3) << lidar_distance
+                << " world=" << format_xyz(
+              pick_pose.pose.position.x,
+              pick_pose.pose.position.y,
+              pick_pose.pose.position.z);
+            status = out.str();
+          }
+          last_pick_call_status_ = status;
+        }
+
+        if (!response->success) {
+          append_log("mock get_pick_pos: object=" + object_name + " -> fail: " + status);
+          return;
+        }
+
+        append_log(
+          "mock get_pick_pos: object=" + object_name +
+          " -> task_id=" + std::to_string(task_point_id) +
+          " world=" + format_xyz(
+            response->pick_pose.pose.position.x,
+            response->pick_pose.pose.position.y,
+            response->pick_pose.pose.position.z));
+      });
     nav_arm_event_server_ = create_service<navigation::srv::StringCommand>(
       nav_arm_event_service_,
       [this](
@@ -336,7 +418,8 @@ public:
       " task_points_topic=" + nav_task_points_topic_ +
       " arm_mission_service=" + arm_mission_service_ +
       " arm_debug_state_service=" + arm_debug_state_service_ +
-      " arm_event_service=" + nav_arm_event_service_);
+      " arm_event_service=" + nav_arm_event_service_ +
+      " pick_service=" + pick_service_name_);
   }
 
   Snapshot snapshot() const
@@ -353,10 +436,16 @@ public:
     out.state_frame_id = state_frame_id_;
     out.state_child_frame_id = state_child_frame_id_;
     out.task_points = task_points_;
+    out.vision_override_enabled = vision_override_enabled_;
+    out.vision_pick_z = vision_pick_z_;
+    out.vision_lidar_in_arm_x = vision_lidar_in_arm_x_;
+    out.vision_lidar_in_arm_y = vision_lidar_in_arm_y_;
+    out.vision_lidar_in_arm_yaw_rad = vision_lidar_in_arm_yaw_rad_;
     out.arm_event_response_success = arm_event_response_success_;
     out.arm_event_response_message = arm_event_response_message_;
     out.last_mission_call_status = last_mission_call_status_;
     out.last_debug_state_call_status = last_debug_state_call_status_;
+    out.last_pick_call_status = last_pick_call_status_;
     out.has_last_arm_event_request = has_last_arm_event_request_;
     out.last_arm_event_request = last_arm_event_request_;
     out.last_arm_event_request_age_sec =
@@ -429,6 +518,28 @@ public:
       pose_publish_hz_ = clamp_hz(hz);
     }
     append_log("pose publish rate set to " + format_double(clamp_hz(hz), 1) + " Hz");
+  }
+
+  void set_mock_pick_config(
+    bool enabled,
+    double pick_z,
+    double lidar_in_arm_x,
+    double lidar_in_arm_y,
+    double lidar_in_arm_yaw_rad)
+  {
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      vision_override_enabled_ = enabled;
+      vision_pick_z_ = pick_z;
+      vision_lidar_in_arm_x_ = lidar_in_arm_x;
+      vision_lidar_in_arm_y_ = lidar_in_arm_y;
+      vision_lidar_in_arm_yaw_rad_ = lidar_in_arm_yaw_rad;
+    }
+    append_log(
+      std::string("mock get_pick_pos ") + (enabled ? "enabled" : "disabled") +
+      " z=" + format_double(pick_z, 3) +
+      " lidar_in_arm=(" + format_double(lidar_in_arm_x, 3) + ", " +
+      format_double(lidar_in_arm_y, 3) + ", yaw=" + format_double(lidar_in_arm_yaw_rad, 3) + ")");
   }
 
   void set_arm_event_response(bool success, const std::string & message)
@@ -619,6 +730,91 @@ private:
     return out.str();
   }
 
+  bool compute_mock_pick_pose_locked(
+    geometry_msgs::msg::PoseStamped * out_pose,
+    int * task_point_id,
+    double * lidar_distance,
+    std::string * status)
+  {
+    if (!vision_override_enabled_) {
+      if (status) {
+        *status = "mock get_pick_pos disabled";
+      }
+      return false;
+    }
+    if (out_pose == nullptr) {
+      if (status) {
+        *status = "null output pose";
+      }
+      return false;
+    }
+    if (task_points_.empty()) {
+      if (status) {
+        *status = "no task points";
+      }
+      return false;
+    }
+
+    const TaskPointState * nearest = nullptr;
+    double best_distance = std::numeric_limits<double>::infinity();
+    for (const auto & point : task_points_) {
+      const double dx = point.x - pose_x_;
+      const double dy = point.y - pose_y_;
+      const double distance = std::hypot(dx, dy);
+      if (distance < best_distance) {
+        best_distance = distance;
+        nearest = &point;
+      }
+    }
+
+    if (nearest == nullptr) {
+      if (status) {
+        *status = "nearest task point not found";
+      }
+      return false;
+    }
+
+    const double arm_yaw = normalize_angle(pose_yaw_rad_ - vision_lidar_in_arm_yaw_rad_);
+    const double cos_yaw = std::cos(arm_yaw);
+    const double sin_yaw = std::sin(arm_yaw);
+    const double offset_x_world =
+      cos_yaw * vision_lidar_in_arm_x_ - sin_yaw * vision_lidar_in_arm_y_;
+    const double offset_y_world =
+      sin_yaw * vision_lidar_in_arm_x_ + cos_yaw * vision_lidar_in_arm_y_;
+    const double arm_x = pose_x_ - offset_x_world;
+    const double arm_y = pose_y_ - offset_y_world;
+
+    const double dx_world = nearest->x - arm_x;
+    const double dy_world = nearest->y - arm_y;
+    const double rel_x = cos_yaw * dx_world + sin_yaw * dy_world;
+    const double rel_y = -sin_yaw * dx_world + cos_yaw * dy_world;
+
+    out_pose->header.stamp = now();
+    out_pose->header.frame_id = "world";
+    out_pose->pose.position.x = rel_x;
+    out_pose->pose.position.y = rel_y;
+    out_pose->pose.position.z = vision_pick_z_;
+    out_pose->pose.orientation.x = 0.0;
+    out_pose->pose.orientation.y = 0.0;
+    out_pose->pose.orientation.z = 0.0;
+    out_pose->pose.orientation.w = 1.0;
+
+    if (task_point_id != nullptr) {
+      *task_point_id = nearest->id;
+    }
+    if (lidar_distance != nullptr) {
+      *lidar_distance = best_distance;
+    }
+    if (status != nullptr) {
+      std::ostringstream out;
+      out << "task_id=" << nearest->id
+          << " lidar_dist=" << std::fixed << std::setprecision(3) << best_distance
+          << " world=" << format_xyz(rel_x, rel_y, vision_pick_z_);
+      *status = out.str();
+    }
+    return true;
+  }
+
   void maybe_publish_pose()
   {
     bool should_publish = false;
@@ -658,6 +854,7 @@ private:
   std::string arm_mission_service_;
   std::string arm_debug_state_service_;
   std::string nav_arm_event_service_;
+  std::string pick_service_name_;
   std::string nav_mission_request_topic_;
   std::string nav_mission_response_topic_;
   std::string nav_arm_event_request_topic_;
@@ -672,12 +869,18 @@ private:
   double pose_x_{0.0};
   double pose_y_{0.0};
   double pose_yaw_rad_{0.0};
+  bool vision_override_enabled_{false};
+  double vision_pick_z_{0.12};
+  double vision_lidar_in_arm_x_{0.127};
+  double vision_lidar_in_arm_y_{0.0};
+  double vision_lidar_in_arm_yaw_rad_{-1.570796};
   bool arm_event_response_success_{true};
   std::string arm_event_response_message_{"ack"};
   std::vector<TaskPointState> default_task_points_;
   std::vector<TaskPointState> task_points_;
   std::string last_mission_call_status_{"idle"};
   std::string last_debug_state_call_status_{"idle"};
+  std::string last_pick_call_status_{"idle"};
   bool has_last_arm_event_request_{false};
   std::string last_arm_event_request_;
   rclcpp::Time last_arm_event_request_time_{0, 0, RCL_ROS_TIME};
@@ -703,6 +906,7 @@ private:
   rclcpp::Publisher<navigation::msg::MapPointArray>::SharedPtr nav_task_points_pub_;
   rclcpp::Client<navigation::srv::MissionCommand>::SharedPtr arm_mission_client_;
   rclcpp::Client<navigation::srv::MissionCommand>::SharedPtr arm_debug_state_client_;
+  rclcpp::Service<robot_msgs::srv::GetPickPos>::SharedPtr pick_service_server_;
   rclcpp::Service<navigation::srv::StringCommand>::SharedPtr nav_arm_event_server_;
   rclcpp::Subscription<navigation::srv::MissionCommand::Request>::SharedPtr mission_request_sub_;
   rclcpp::Subscription<navigation::srv::MissionCommand::Response>::SharedPtr mission_response_sub_;
@@ -970,7 +1174,7 @@ public:
   : node_(std::move(node))
   {
     setWindowTitle(QStringLiteral("Navigation Mock Debug Tool"));
-    resize(1560, 920);
+    resize(1520, 820);
 
     auto * central = new QWidget(this);
     auto * root_layout = new QVBoxLayout(central);
@@ -990,13 +1194,14 @@ public:
 
     auto * right_panel = new QWidget(splitter);
     auto * right_layout = new QVBoxLayout(right_panel);
+    right_layout->setContentsMargins(0, 0, 0, 0);
+    right_layout->setSpacing(6);
     right_layout->addWidget(build_pose_group(right_panel));
     right_layout->addWidget(build_mission_group(right_panel));
     right_layout->addWidget(build_arm_state_group(right_panel));
     right_layout->addWidget(build_arm_event_group(right_panel));
-    right_layout->addWidget(build_debug_group(right_panel));
-    right_layout->addWidget(build_task_points_group(right_panel), 1);
-    right_layout->addWidget(build_logs_group(right_panel), 1);
+    right_layout->addWidget(build_mock_vision_group(right_panel));
+    right_layout->addWidget(build_bottom_tabs(right_panel), 1);
     splitter->addWidget(right_panel);
     splitter->setStretchFactor(0, 2);
     splitter->setStretchFactor(1, 1);
@@ -1127,6 +1332,36 @@ private:
     return group;
   }
 
+  QWidget * build_mock_vision_group(QWidget * parent)
+  {
+    auto * group = new QGroupBox(QStringLiteral("Mock Vision"), parent);
+    auto * layout = new QGridLayout(group);
+
+    vision_override_check_ = new QCheckBox(QStringLiteral("Override get_pick_pos"), group);
+    vision_pick_z_spin_ = make_double_spin(-2.0, 2.0, 3, 0.01, group);
+    vision_lidar_x_spin_ = make_double_spin(-2.0, 2.0, 3, 0.01, group);
+    vision_lidar_y_spin_ = make_double_spin(-2.0, 2.0, 3, 0.01, group);
+    vision_lidar_yaw_deg_spin_ = make_double_spin(-360.0, 360.0, 1, 1.0, group);
+    vision_status_label_ = new QLabel(QStringLiteral("idle"), group);
+    auto * note = new QLabel(
+      QStringLiteral("Returns the nearest task point to the mock lidar, converted to arm world coordinates."),
+      group);
+    note->setWordWrap(true);
+
+    layout->addWidget(vision_override_check_, 0, 0, 1, 4);
+    layout->addWidget(new QLabel(QStringLiteral("pick z (m)"), group), 1, 0);
+    layout->addWidget(vision_pick_z_spin_, 1, 1);
+    layout->addWidget(new QLabel(QStringLiteral("lidar x (m)"), group), 1, 2);
+    layout->addWidget(vision_lidar_x_spin_, 1, 3);
+    layout->addWidget(new QLabel(QStringLiteral("lidar y (m)"), group), 2, 0);
+    layout->addWidget(vision_lidar_y_spin_, 2, 1);
+    layout->addWidget(new QLabel(QStringLiteral("lidar yaw (deg)"), group), 2, 2);
+    layout->addWidget(vision_lidar_yaw_deg_spin_, 2, 3);
+    layout->addWidget(vision_status_label_, 3, 0, 1, 4);
+    layout->addWidget(note, 4, 0, 1, 4);
+    return group;
+  }
+
   QWidget * build_debug_group(QWidget * parent)
   {
     auto * group = new QGroupBox(QStringLiteral("Debug Mirrors"), parent);
@@ -1144,6 +1379,14 @@ private:
     layout->addRow(QStringLiteral("Arm Event Rsp"), debug_arm_event_response_label_);
     layout->addRow(QStringLiteral("Target Pose"), target_pose_label_);
     return group;
+  }
+
+  QWidget * build_bottom_tabs(QWidget * parent)
+  {
+    auto * tabs = new QTabWidget(parent);
+    tabs->addTab(build_task_points_group(tabs), QStringLiteral("Task Points"));
+    tabs->addTab(build_logs_group(tabs), QStringLiteral("Logs"));
+    return tabs;
   }
 
   QWidget * build_task_points_group(QWidget * parent)
@@ -1230,6 +1473,22 @@ private:
     });
     connect(arm_event_message_edit_, &QLineEdit::textChanged, this, [this](const QString &) {
       push_arm_event_response_config();
+    });
+
+    connect(vision_override_check_, &QCheckBox::toggled, this, [this](bool) {
+      push_mock_vision_config();
+    });
+    connect(vision_pick_z_spin_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double) {
+      push_mock_vision_config();
+    });
+    connect(vision_lidar_x_spin_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double) {
+      push_mock_vision_config();
+    });
+    connect(vision_lidar_y_spin_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double) {
+      push_mock_vision_config();
+    });
+    connect(vision_lidar_yaw_deg_spin_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double) {
+      push_mock_vision_config();
     });
 
     connect(use_selected_button_, &QPushButton::clicked, this, [this]() {
@@ -1349,6 +1608,16 @@ private:
       arm_event_message_edit_->text().toStdString());
   }
 
+  void push_mock_vision_config()
+  {
+    node_->set_mock_pick_config(
+      vision_override_check_->isChecked(),
+      vision_pick_z_spin_->value(),
+      vision_lidar_x_spin_->value(),
+      vision_lidar_y_spin_->value(),
+      vision_lidar_yaw_deg_spin_->value() * kDegToRad);
+  }
+
   void push_task_points_table_to_node()
   {
     std::vector<TaskPointState> points;
@@ -1442,11 +1711,26 @@ private:
       ui_pose_synced_once_ = true;
     }
 
+    if (!ui_vision_synced_once_) {
+      QSignalBlocker block_enabled(vision_override_check_);
+      QSignalBlocker block_z(vision_pick_z_spin_);
+      QSignalBlocker block_x(vision_lidar_x_spin_);
+      QSignalBlocker block_y(vision_lidar_y_spin_);
+      QSignalBlocker block_yaw(vision_lidar_yaw_deg_spin_);
+      vision_override_check_->setChecked(snapshot.vision_override_enabled);
+      vision_pick_z_spin_->setValue(snapshot.vision_pick_z);
+      vision_lidar_x_spin_->setValue(snapshot.vision_lidar_in_arm_x);
+      vision_lidar_y_spin_->setValue(snapshot.vision_lidar_in_arm_y);
+      vision_lidar_yaw_deg_spin_->setValue(snapshot.vision_lidar_in_arm_yaw_rad * kRadToDeg);
+      ui_vision_synced_once_ = true;
+    }
+
     const QString status = QStringLiteral(
-      "mission_service=%1 | debug_state=%2 | mock_pub=%3 | pose=%4 | points=%5 | arm_event_response=%6")
+      "mission_service=%1 | debug_state=%2 | mock_pub=%3 | vision=%4 | pose=%5 | points=%6 | arm_event_response=%7")
       .arg(snapshot.mission_service_ready ? QStringLiteral("up") : QStringLiteral("down"))
       .arg(snapshot.debug_state_service_ready ? QStringLiteral("up") : QStringLiteral("down"))
       .arg(snapshot.mock_nav_publish_enabled ? QStringLiteral("on") : QStringLiteral("off"))
+      .arg(snapshot.vision_override_enabled ? QStringLiteral("on") : QStringLiteral("off"))
       .arg(QString::fromStdString(format_pose(snapshot.pose_x, snapshot.pose_y, snapshot.pose_yaw_rad)))
       .arg(snapshot.task_points.size())
       .arg(snapshot.arm_event_response_success ? QStringLiteral("success") : QStringLiteral("fail"));
@@ -1454,42 +1738,53 @@ private:
 
     mission_status_label_->setText(QString::fromStdString(snapshot.last_mission_call_status));
     debug_state_status_label_->setText(QString::fromStdString(snapshot.last_debug_state_call_status));
+    vision_status_label_->setText(QString::fromStdString(snapshot.last_pick_call_status));
 
     last_arm_event_request_label_->setText(
       snapshot.has_last_arm_event_request ?
       QString::fromStdString(snapshot.last_arm_event_request) :
       QStringLiteral("none"));
 
-    debug_mission_request_label_->setText(
-      snapshot.has_debug_mission_request ?
-      QString::fromStdString(snapshot.debug_mission_request) :
-      QStringLiteral("none"));
-    debug_mission_response_label_->setText(
-      snapshot.has_debug_mission_response ?
-      QString::fromStdString(snapshot.debug_mission_response) :
-      QStringLiteral("none"));
-    debug_arm_event_request_label_->setText(
-      snapshot.has_debug_arm_event_request ?
-      QString::fromStdString(snapshot.debug_arm_event_request) :
-      QStringLiteral("none"));
-    debug_arm_event_response_label_->setText(
-      snapshot.has_debug_arm_event_response ?
-      QString::fromStdString(snapshot.debug_arm_event_response) :
-      QStringLiteral("none"));
+    if (debug_mission_request_label_ != nullptr) {
+      debug_mission_request_label_->setText(
+        snapshot.has_debug_mission_request ?
+        QString::fromStdString(snapshot.debug_mission_request) :
+        QStringLiteral("none"));
+    }
+    if (debug_mission_response_label_ != nullptr) {
+      debug_mission_response_label_->setText(
+        snapshot.has_debug_mission_response ?
+        QString::fromStdString(snapshot.debug_mission_response) :
+        QStringLiteral("none"));
+    }
+    if (debug_arm_event_request_label_ != nullptr) {
+      debug_arm_event_request_label_->setText(
+        snapshot.has_debug_arm_event_request ?
+        QString::fromStdString(snapshot.debug_arm_event_request) :
+        QStringLiteral("none"));
+    }
+    if (debug_arm_event_response_label_ != nullptr) {
+      debug_arm_event_response_label_->setText(
+        snapshot.has_debug_arm_event_response ?
+        QString::fromStdString(snapshot.debug_arm_event_response) :
+        QStringLiteral("none"));
+    }
 
-    if (snapshot.has_target_pose) {
-      target_pose_label_->setText(
-        QString::fromStdString(
-          format_pose(
-            snapshot.target_pose.position.x,
-            snapshot.target_pose.position.y,
-            yaw_from_quaternion_wxyz(
-              snapshot.target_pose.orientation.w,
-              snapshot.target_pose.orientation.x,
-              snapshot.target_pose.orientation.y,
-              snapshot.target_pose.orientation.z))));
-    } else {
-      target_pose_label_->setText(QStringLiteral("none"));
+    if (target_pose_label_ != nullptr) {
+      if (snapshot.has_target_pose) {
+        target_pose_label_->setText(
+          QString::fromStdString(
+            format_pose(
+              snapshot.target_pose.position.x,
+              snapshot.target_pose.position.y,
+              yaw_from_quaternion_wxyz(
+                snapshot.target_pose.orientation.w,
+                snapshot.target_pose.orientation.x,
+                snapshot.target_pose.orientation.y,
+                snapshot.target_pose.orientation.z))));
+      } else {
+        target_pose_label_->setText(QStringLiteral("none"));
+      }
     }
 
     NavMapView::DrawState draw_state;
@@ -1543,6 +1838,12 @@ private:
   QCheckBox * arm_event_success_check_{nullptr};
   QLineEdit * arm_event_message_edit_{nullptr};
   QLabel * last_arm_event_request_label_{nullptr};
+  QCheckBox * vision_override_check_{nullptr};
+  QDoubleSpinBox * vision_pick_z_spin_{nullptr};
+  QDoubleSpinBox * vision_lidar_x_spin_{nullptr};
+  QDoubleSpinBox * vision_lidar_y_spin_{nullptr};
+  QDoubleSpinBox * vision_lidar_yaw_deg_spin_{nullptr};
+  QLabel * vision_status_label_{nullptr};
   QLabel * debug_mission_request_label_{nullptr};
   QLabel * debug_mission_response_label_{nullptr};
   QLabel * debug_arm_event_request_label_{nullptr};
@@ -1556,6 +1857,7 @@ private:
   QPlainTextEdit * logs_view_{nullptr};
   QTimer * refresh_timer_{nullptr};
   bool ui_pose_synced_once_{false};
+  bool ui_vision_synced_once_{false};
   bool adding_table_rows_{false};
   bool has_selected_task_point_{false};
   int selected_task_point_id_{0};

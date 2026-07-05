@@ -145,7 +145,7 @@ void TaskPrimitives::wait_joints_still(double dq_threshold, int timeout_ms)
       if (!stable_seen) {
         stable_since = now;
         stable_seen = true;
-      } else if (now - stable_since >= 150ms) {
+      } else if (now - stable_since >= 100ms) {
         return;
       }
     } else {

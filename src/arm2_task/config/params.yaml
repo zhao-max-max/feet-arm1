@@ -43,8 +43,8 @@
         kp: [2.0, 8.5, 3.0, 1.2, 0.1]
       # 1. 待机模式 (IDLE): 低增益，防止电机高频振动发热，允许手动推过
       idle:
-        kd: [2.5, 0.5, 0.5, 0.2, 0.1]
-        kp: [6.0, 2.0, 1.0, 0.5, 0.0]
+        kd: [3.5, 0.5, 0.5, 0.2, 0.1]
+        kp: [8.0, 2.0, 1.0, 0.5, 0.0]
       #4. 负载模式 (LOADED): 高增益，应对抓取 500g 负载后的惯量增加，提高刚性减少静差
       loaded:
         kd: [3.0, 8.5, 8.0, 3.2, 0.2]         # 之前是8.0
@@ -95,29 +95,39 @@
       require_suction_service: false
       manual_mode: false        # false = nav 触发模式（默认），true = 菜单交互模式（调试用）
 
+    # pickup 相关参数。
+    # nav 模式下 pickup 走 get_pick_pos / nav_mock_ui mock vision，返回的目标 z
+    # 会继续叠加 object_height / tool_offset_z / tool_tip_length 补偿。
     task_step6:
-      grasp_pitch:       -1.57    # 抓取末端俯仰角 (rad)
-      tool_pitch_offset:  0.25     # 实机 pitch 标定偏移 (rad)，正值=吸盘往前倾
-      tool_yaw_offset:    0.0   # 实机 yaw 标定偏移 (rad)，正值=逆时针(从上往下看)
-      object_height:      0.005    # 物体高度，决定末端 Z 落点 (m)
-      pre_grasp_offset:   0.10    # 预抓取悬停高度偏移 (m)
-      tool_offset_x:      0.0    # 工具坐标系偏移0.02 0.05
-      tool_offset_y:      0.0
-      tool_offset_z:      0.02    #有些挤压，但精准度会好一些  # 工具坐标系偏移（补偿 base_link Z=0.38m 偏置）  之前是-0.17
-      tool_tip_length:    0.0     # 吸盘接触面到 Link_5 origin 的距离 (m)，沿末端方向补偿
+      grasp_pitch:       -1.57    # 抓取时末端俯仰角 (rad)
+      tool_pitch_offset:  0.25    # 实机 pitch 标定偏移 (rad)，正值=吸盘往前倾
+      tool_yaw_offset:    0.0     # 实机 yaw 标定偏移 (rad)，正值=从上往下看逆时针
+      object_height:      0.005   # pickup 最终接触高度补偿：目标 z + object_height (m)
+      pre_grasp_offset:   0.10    # pickup 预抓取悬停高度：在最终抓取点上方再抬高这么多 (m)
+      tool_offset_x:      0.0     # 工具坐标系相对末端的 x 偏移 (m)
+      tool_offset_y:      0.0     # 工具坐标系相对末端的 y 偏移 (m)
+      tool_offset_z:      0.02    # pickup 最终接触高度补偿：目标 z + tool_offset_z (m)
+      tool_tip_length:    0.0     # 吸盘接触面到 Link_5 origin 的距离 (m)，沿末端朝向补偿
       pick_object_name:  "box"    # 传给 get_pick_pos 服务的物体名
-      use_mock_target:    false   # true 时 case6 用固定坐标（调试用）
+      use_mock_target:    false   # 仅终端/独立抓取调试用；nav 模式下 pickup 不走这里
       mock_x:             0.35
       mock_y:             0.0
       mock_z:             0.12
 
+    # place 共用参数。
+    # 注意：nav 模式当前走 place_pose_direct_height()，
+    # 其中 retreat_offset 会生效，但 pre_place_offset 不会生效。
     task_place:
-      pre_place_offset:   0.12    # 预放置悬停高度偏移 (m)
-      retreat_offset:     0.15    # 放置后垂直后退距离 (m)
+      pre_place_offset:   0.12    # 仅普通 do_place_move() 路径使用；nav place 目前不使用
+      retreat_offset:     0.15    # place 完成后，末端沿 z 方向抬起/后退的距离 (m)
 
+    # frame/place 姿态参数。
+    # nav 模式当前 place 走 direct_height 路径：
+    # - hover_height 生效：决定 place 前悬停高度
+    # - contact_offset 不生效：仅 place_frame 路径使用
     task_place_frame:
-      hover_height:       0.10
-      contact_offset:     0.45   #放置可以修改这个
+      hover_height:       0.10    # nav place 预放置悬停高度：在最终 place z 上方再抬高这么多 (m)
+      contact_offset:     0.45    # 仅 do_place_move_with_orientation() 使用；nav place 目前不使用
       frame_name:         "target_frame"
       roll_sign:          1.0
       use_mock_target:    false
@@ -137,10 +147,12 @@
       mock_z:             0.1
       mock_yaw:           0.0
 
+    # nav 接口参数。
+    # nav place 的最终落点高度由 place_height 直接决定。
     task_nav:
       state_topic:        /navigation/state
       task_points_topic:  /navigation/task_points
-      place_height:       0.28
+      place_height:       -0.2    # nav place 最终放置高度 z (m)，直接作为 place target z
       # 机器狗/导航 base_link 到雷达坐标系的静态外参。
       # 等价命令：
       # ros2 run tf2_ros static_transform_publisher --x 0.127 --y 0 --z 0 --roll 0 --pitch 0 --yaw -1.570796 --frame-id base_link --child-frame-id lidar_link

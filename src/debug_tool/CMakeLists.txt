@@ -42,6 +42,7 @@ ament_target_dependencies(nav_mock_ui
   nav_msgs
   navigation
   rclcpp
+  robot_msgs
 )
 target_link_libraries(nav_mock_ui
   Qt5::Widgets

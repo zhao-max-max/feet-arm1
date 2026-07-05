@@ -50,6 +50,11 @@ def generate_launch_description():
         default_value="/debug/nav/arm_event_response",
         description="Mirrored arm_event response debug topic",
     )
+    pick_service_name_arg = DeclareLaunchArgument(
+        "pick_service_name",
+        default_value="get_pick_pos",
+        description="Mock pick service provided by this UI",
+    )
     target_pose_topic_arg = DeclareLaunchArgument(
         "target_pose_topic",
         default_value="/task/target_pose",
@@ -70,6 +75,31 @@ def generate_launch_description():
         default_value="10.0",
         description="Mock lidar pose publish rate",
     )
+    vision_override_enabled_arg = DeclareLaunchArgument(
+        "vision_override_enabled",
+        default_value="false",
+        description="Whether nav_mock_ui should override get_pick_pos",
+    )
+    vision_pick_z_arg = DeclareLaunchArgument(
+        "vision_pick_z",
+        default_value="0.12",
+        description="Returned pick z in arm world coordinates",
+    )
+    vision_lidar_in_arm_x_arg = DeclareLaunchArgument(
+        "vision_lidar_in_arm_x",
+        default_value="0.127",
+        description="Lidar x offset in arm base frame used by mock pick conversion",
+    )
+    vision_lidar_in_arm_y_arg = DeclareLaunchArgument(
+        "vision_lidar_in_arm_y",
+        default_value="0.0",
+        description="Lidar y offset in arm base frame used by mock pick conversion",
+    )
+    vision_lidar_in_arm_yaw_rad_arg = DeclareLaunchArgument(
+        "vision_lidar_in_arm_yaw_rad",
+        default_value="-1.570796",
+        description="Lidar yaw offset in arm base frame used by mock pick conversion",
+    )
 
     nav_mock_ui = Node(
         package="debug_tool",
@@ -88,10 +118,16 @@ def generate_launch_description():
                 "nav_mission_response_topic": LaunchConfiguration("nav_mission_response_topic"),
                 "nav_arm_event_request_topic": LaunchConfiguration("nav_arm_event_request_topic"),
                 "nav_arm_event_response_topic": LaunchConfiguration("nav_arm_event_response_topic"),
+                "pick_service_name": LaunchConfiguration("pick_service_name"),
                 "target_pose_topic": LaunchConfiguration("target_pose_topic"),
                 "pose_auto_publish": LaunchConfiguration("pose_auto_publish"),
                 "mock_nav_publish_enabled": LaunchConfiguration("mock_nav_publish_enabled"),
                 "pose_publish_hz": LaunchConfiguration("pose_publish_hz"),
+                "vision_override_enabled": LaunchConfiguration("vision_override_enabled"),
+                "vision_pick_z": LaunchConfiguration("vision_pick_z"),
+                "vision_lidar_in_arm_x": LaunchConfiguration("vision_lidar_in_arm_x"),
+                "vision_lidar_in_arm_y": LaunchConfiguration("vision_lidar_in_arm_y"),
+                "vision_lidar_in_arm_yaw_rad": LaunchConfiguration("vision_lidar_in_arm_yaw_rad"),
             }
         ],
     )
@@ -107,10 +143,16 @@ def generate_launch_description():
             nav_mission_response_topic_arg,
             nav_arm_event_request_topic_arg,
             nav_arm_event_response_topic_arg,
+            pick_service_name_arg,
             target_pose_topic_arg,
             pose_auto_publish_arg,
             mock_nav_publish_enabled_arg,
             pose_publish_hz_arg,
+            vision_override_enabled_arg,
+            vision_pick_z_arg,
+            vision_lidar_in_arm_x_arg,
+            vision_lidar_in_arm_y_arg,
+            vision_lidar_in_arm_yaw_rad_arg,
             nav_mock_ui,
         ]
     )

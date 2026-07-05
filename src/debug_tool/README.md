@@ -123,6 +123,7 @@ It provides:
 - a mock `/navigation/task_points` publisher
 - a client for `/arm/mission_event`
 - a server for `/navigation/arm_event`
+- an optional mock `get_pick_pos` server for nav pickup debugging without the real vision node
 - a 2D map view for task points, mock pose, and `/task/target_pose`
 - subscriptions to `/debug/nav/*` mirror topics published by `arm2_task`
 
@@ -148,7 +149,9 @@ ros2 run debug_tool nav_mock_ui --ros-args \
   -p arm_mission_service:=/arm/mission_event \
   -p nav_arm_event_service:=/navigation/arm_event \
   -p pose_auto_publish:=true \
-  -p pose_publish_hz:=10.0
+  -p pose_publish_hz:=10.0 \
+  -p vision_override_enabled:=false \
+  -p vision_pick_z:=0.12
 ```
 
 Interaction notes:
@@ -156,4 +159,5 @@ Interaction notes:
 - left-click a task point on the map to select it
 - right-click the map to move the mock lidar pose in `x/y`
 - edit pose, task points, and mission fields from the right panel
+- enable `Mock Vision` to make `get_pick_pos` return the nearest task point converted into arm `world` coordinates
 - incoming arm callbacks are answered automatically using the configured response fields

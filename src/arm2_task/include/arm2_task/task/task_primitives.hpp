@@ -65,7 +65,7 @@ public:
   double get_box_edge_roll(const geometry_msgs::msg::Pose & world_pose);
   double get_frame_yaw(const geometry_msgs::msg::Pose & frame_world) const;
 
-  void wait_joints_still(double dq_threshold = 0.02, int timeout_ms = 1000);
+  void wait_joints_still(double dq_threshold = 0.06, int timeout_ms = 1000);
 
   void do_reset();
   void do_reset_suction();
