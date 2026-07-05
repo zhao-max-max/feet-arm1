@@ -28,6 +28,10 @@ SIM_WS="${SIM_WS:-$HOME/data/robotics/arm_mujuco_ws}"
 NAV_WS_SETUP="${NAV_WS_SETUP:-$HOME/task/nav_ws/install/setup.bash}"
 SUCTION_WS="${SUCTION_WS:-$WS_DIR}"
 SUCTION_PORT="${SUCTION_PORT:-/dev/esp32_suction_c3}"
+ROS_DOMAIN_ENV_FILE="${ROS_DOMAIN_ENV_FILE:-$WS_DIR/.ros_domain_id.env}"
+
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/scripts/common_ros_domain.sh"
 
 # udev（Damiao USB CAN 适配器）
 DM_UDEV_RULE_SRC="$WS_DIR/src/dm_motor_sdk_ros/udev/99-dm-usb2canfd.rules"
@@ -99,6 +103,8 @@ source_setup() {
   source "$1"
   set -u
 }
+
+source_repo_ros_domain_env "$WS_DIR"
 
 run_with_privilege() {
   if [[ "$(id -u)" -eq 0 ]]; then "$@"; else sudo "$@"; fi
@@ -261,6 +267,7 @@ echo "  mode         : $([ "$SIM_MODE" == "true" ] && echo "仿真（MuJoCo）" 
 echo "  task_mode    : $TASK_MODE"
 echo "  debug_tool   : $DEBUG_TOOL_ENABLED"
 echo "  task_in_xterm: $TASK_IN_XTERM"
+echo "  ros_domain_id: ${ROS_DOMAIN_ID:-<unset>}"
 echo ""
 
 # ------------------------------------------------------------------ #

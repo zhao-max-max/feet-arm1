@@ -1,11 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 ROOT_DIR="/home/primarymage/WorkFile/esp_ws"
 WS_DIR="${ROOT_DIR}/ros2_suction_ws"
+
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/common_ros_domain.sh"
+source_repo_ros_domain_env "${REPO_DIR}"
+
 SERIAL_PORT="${1:-/dev/esp32_suction_c3}"
 SERVICE_NAME="${2:-set_suction}"
-ROS_DOMAIN_ID_VALUE="${3:-65}"
+ROS_DOMAIN_ID_VALUE="${3:-${ROS_DOMAIN_ID:-66}}"
 RMW_IMPL="${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}"
 
 if [[ ! -f /opt/ros/humble/setup.bash ]]; then

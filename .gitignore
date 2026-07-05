@@ -50,6 +50,7 @@ Thumbs.db
 # 临时文件
 *~
 *.swp
+.ros_domain_id.env
 
 # ROS test result
 test_results/
