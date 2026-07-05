@@ -75,7 +75,7 @@ Options:
   --terminal           task_node 使用终端调试模式
   --task-mode <mode>   task_node 模式：nav 或 terminal（默认 nav）
   --debug-tool         启动 debug_tool_node（run_arm_nav.sh 默认开启）
-  --no-xterm           task_node 输出到当前终端，不弹 xterm（SSH 场景）
+  --no-xterm           task_node 输出到当前终端，不弹 xterm（SSH / 无图形环境）
   --build              启动前先编译 dm_motor_sdk_ros 和 arm2_task
   --params <file>      指定 control_node params.yaml 路径
   --task-params <file> 指定 task_node 参数 yaml 路径
@@ -253,6 +253,10 @@ if [[ "$SIM_MODE" == "false" ]]; then
 fi
 if [[ "$TASK_IN_XTERM" == "true" ]] && ! command -v xterm &>/dev/null; then
   echo "[run_arm] WARN: xterm not found, falling back to inline output (--no-xterm)."
+  TASK_IN_XTERM=false
+fi
+if [[ "$TASK_IN_XTERM" == "true" ]] && [[ -z "${DISPLAY:-}" ]] && [[ -z "${WAYLAND_DISPLAY:-}" ]]; then
+  echo "[run_arm] WARN: no graphical display detected, falling back to inline output (--no-xterm)."
   TASK_IN_XTERM=false
 fi
 
