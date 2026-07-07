@@ -875,7 +875,9 @@ bool NavTaskInterface::execute_mission_command(const MissionCommand & command)
 
 void NavTaskInterface::run()
 {
-  RCLCPP_INFO(node_->get_logger(), "[nav] Ready. Waiting for /arm/mission_event mission commands...");
+  RCLCPP_INFO(node_->get_logger(), "[nav] Ready. Homing to reset posture...");
+  primitives_->do_reset();
+  RCLCPP_INFO(node_->get_logger(), "[nav] Waiting for /arm/mission_event mission commands...");
 
   while (rclcpp::ok() && is_running_->load()) {
     MissionCommand command;
