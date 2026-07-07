@@ -731,55 +731,63 @@ bool NavTaskInterface::do_place_sequence(const MissionCommand & command)
          << ",place_height=" << config_.place_height;
   publish_timing_event(node_, timing_event_pub_, "mission", "place_sequence", "begin", detail.str());
 
-  arm2_task::task::RelativePlanarPose relative_pose;
-  if (!compute_command_relative_pose(command, &relative_pose)) {
-    RCLCPP_ERROR(
+  // 先尝试狗头相机感知放置（含 roll 对齐）
+  bool place_ok = sequences_->place_from_perception();
+
+  if (!place_ok) {
+    // 感知失败，降级到雷达坐标兜底
+    RCLCPP_WARN(
       node_->get_logger(),
-      "[nav] Place failed: unable to compute arm-relative place pose for task_index=%u.",
+      "[nav] Visual place failed for task_index=%u; falling back to radar pose.",
       command.task_index);
-    publish_timing_event(
-      node_, timing_event_pub_, "mission", "place_sequence", "end",
-      detail.str() + ",ok=0,reason=relative_pose_failed");
-    return false;
+
+    arm2_task::task::RelativePlanarPose relative_pose;
+    if (!compute_command_relative_pose(command, &relative_pose)) {
+      RCLCPP_ERROR(
+        node_->get_logger(),
+        "[nav] Place fallback failed: unable to compute arm-relative pose for task_index=%u.",
+        command.task_index);
+      publish_timing_event(
+        node_, timing_event_pub_, "mission", "place_sequence", "end",
+        detail.str() + ",ok=0,reason=relative_pose_failed");
+      return false;
+    }
+
+    geometry_msgs::msg::Pose fallback_pose;
+    fallback_pose.position.x = relative_pose.x;
+    fallback_pose.position.y = relative_pose.y;
+    fallback_pose.position.z = config_.place_height;
+    fallback_pose.orientation.x = 0.0;
+    fallback_pose.orientation.y = 0.0;
+    fallback_pose.orientation.z = std::sin(relative_pose.yaw / 2.0);
+    fallback_pose.orientation.w = std::cos(relative_pose.yaw / 2.0);
+
+    RCLCPP_INFO(
+      node_->get_logger(),
+      "[nav] Place fallback target_id=%d arm=(x=%.3f, y=%.3f, z=%.3f, yaw=%.3f rad).",
+      relative_pose.task_pose.id,
+      fallback_pose.position.x,
+      fallback_pose.position.y,
+      fallback_pose.position.z,
+      relative_pose.yaw);
+
+    place_ok = sequences_->place_pose_direct_height(fallback_pose);
+    if (!place_ok) {
+      publish_timing_event(
+        node_, timing_event_pub_, "mission", "place_sequence", "end",
+        detail.str() + ",ok=0,reason=place_fallback_failed,target_id=" +
+        std::to_string(relative_pose.task_pose.id));
+      return false;
+    }
   }
 
-  geometry_msgs::msg::Pose place_pose;
-  place_pose.position.x = relative_pose.x;
-  place_pose.position.y = relative_pose.y;
-  place_pose.position.z = config_.place_height;
-  place_pose.orientation.x = 0.0;
-  place_pose.orientation.y = 0.0;
-  place_pose.orientation.z = std::sin(relative_pose.yaw / 2.0);
-  place_pose.orientation.w = std::cos(relative_pose.yaw / 2.0);
-
-  RCLCPP_INFO(
-    node_->get_logger(),
-    "[nav] Place from task point task_index=%u target_id=%d arm=(x=%.3f, y=%.3f, z=%.3f, yaw=%.3f rad %.1f deg).",
-    command.task_index,
-    relative_pose.task_pose.id,
-    place_pose.position.x,
-    place_pose.position.y,
-    place_pose.position.z,
-    relative_pose.yaw,
-    relative_pose.yaw * 180.0 / M_PI);
-
-  if (!sequences_->place_pose_direct_height(place_pose)) {
-    publish_timing_event(
-      node_, timing_event_pub_, "mission", "place_sequence", "end",
-      detail.str() + ",ok=0,reason=place_failed,target_id=" +
-      std::to_string(relative_pose.task_pose.id));
-    return false;
-  }
-
+  primitives_->do_reset();
   rclcpp::sleep_for(500ms);
   send_nav_event("placed");
   send_nav_event("completed");
   publish_timing_event(
     node_, timing_event_pub_, "mission", "place_sequence", "end",
-    detail.str() + ",ok=1,target_id=" + std::to_string(relative_pose.task_pose.id) +
-    ",rel_x=" + std::to_string(relative_pose.x) +
-    ",rel_y=" + std::to_string(relative_pose.y) +
-    ",yaw=" + std::to_string(relative_pose.yaw));
+    detail.str() + ",ok=1");
   return true;
 }
 

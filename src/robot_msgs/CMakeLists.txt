@@ -58,5 +58,6 @@ elseif($ENV{ROS_DISTRO} MATCHES "foxy|humble")
     # 指定依赖项 [cite: 1]
     DEPENDENCIES geometry_msgs
   )
+  ament_export_dependencies(rosidl_default_runtime)
   ament_package()
 endif()
