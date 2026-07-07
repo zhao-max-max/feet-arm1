@@ -44,7 +44,7 @@
     # set_controller_mode 只支持 idle / gravity_comp / moving / loaded。
     gains:
       idle:
-        kp: [8.0, 2.0, 1.0, 0.5, 0.0]
+        kp: [8.0, 2.0, 2.0, 0.5, 0.0]
         kd: [2.5, 0.5, 0.5, 0.2, 0.1]
       gravity_comp:
         kp: [2.0, 8.5, 3.0, 1.2, 0.1]
