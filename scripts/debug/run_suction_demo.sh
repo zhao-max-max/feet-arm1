@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-WS_DIR="/home/zyy/task/arm/feet-arm2-main"
+WS_DIR="${WS_DIR:-${REPO_DIR}}"
 SERIAL_PORT="${1:-/dev/esp32_suction_c3}"
 SERVICE_NAME="${2:-set_suction}"
 SERVER_PID=""

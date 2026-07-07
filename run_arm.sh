@@ -15,6 +15,7 @@ TASK_IN_XTERM="${TASK_IN_XTERM:-true}"  # true=task_node 弹 xterm 窗口
 AUTO_BUILD="${AUTO_BUILD:-false}"        # true=启动前自动编译
 TASK_MODE="${TASK_MODE:-nav}"            # nav=导航任务模式, terminal=终端调试模式
 DEBUG_TOOL_ENABLED="${DEBUG_TOOL_ENABLED:-false}"  # true=启动 debug_tool_node
+RUN_ARM_SHUTDOWN_SUCTION_OFF="${RUN_ARM_SHUTDOWN_SUCTION_OFF:-false}"
 
 # ===== 路径 =====
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -28,6 +29,8 @@ SIM_WS="${SIM_WS:-$HOME/data/robotics/arm_mujuco_ws}"
 NAV_WS_SETUP="${NAV_WS_SETUP:-$HOME/task/nav_ws/install/setup.bash}"
 SUCTION_WS="${SUCTION_WS:-$WS_DIR}"
 SUCTION_PORT="${SUCTION_PORT:-/dev/esp32_suction_c3}"
+SUCTION_SERVICE_NAME="${SUCTION_SERVICE_NAME:-set_suction}"
+SUCTION_OFF_TIMEOUT="${SUCTION_OFF_TIMEOUT:-3}"
 ROS_DOMAIN_ENV_FILE="${ROS_DOMAIN_ENV_FILE:-$WS_DIR/.ros_domain_id.env}"
 
 # shellcheck disable=SC1091
@@ -152,10 +155,29 @@ stop_new_ros2_daemons() {
   done
 }
 
+shutdown_suction_off() {
+  [[ "$RUN_ARM_SHUTDOWN_SUCTION_OFF" == "true" ]] || return 0
+  [[ "$SIM_MODE" == "false" ]] || return 0
+  [[ -n "$SUCTION_PID" ]] || return 0
+  kill -0 "$SUCTION_PID" 2>/dev/null || return 0
+
+  local service_name="/${SUCTION_SERVICE_NAME#/}"
+  local log_file="/tmp/run_arm_suction_off.log"
+  echo "[run_arm] turning suction OFF before shutdown..."
+  if timeout "$SUCTION_OFF_TIMEOUT" \
+      ros2 service call "$service_name" robot_msgs/srv/SetSuction "{activate: false}" \
+      >"$log_file" 2>&1; then
+    echo "[run_arm] suction OFF requested."
+  else
+    echo "[run_arm] WARN: suction OFF request failed or timed out (log: $log_file)" >&2
+  fi
+}
+
 cleanup() {
   (( CLEANUP_RUNNING )) && return
   CLEANUP_RUNNING=1
   echo "[run_arm] shutting down..."
+  shutdown_suction_off
   stop_process_group "$TASK_PID"    "task_node"
   stop_process_group "$DEBUG_TOOL_PID" "debug_tool_node"
   stop_process_group "$SUCTION_PID" "suction_service_node"
