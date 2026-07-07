@@ -16,7 +16,7 @@
 
     # task_node 发送 move_joint goal 时写入的默认速度、加速度和 blend 半径。
     trajectory_planner:
-      max_velocity: 1.0
+      max_velocity: 0.8
       max_acceleration: 2.0
       dist_threshold: 0.10
 
@@ -100,8 +100,8 @@
         prefer_tf: true
         parent_frame: base_link
         child_frame: lidar_link
-        translation: [0.127, 0.0, 0.0]
-        rotation_rpy: [0.0, 0.0, -1.570796]
+        translation: [0.127, 0.0, 0.0]  # youbaote是0.25
+        rotation_rpy: [0.0, 0.0, 0.0]
       # 调试阶段手动指定的地图任务点，作为 nav topic 缺失时的本地副本。
       ids: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
       x: [-1.251139, -0.428469, 0.391736, 1.223170, 1.227952, 0.405132, -0.439627, -1.260851, -1.184853, -0.390241, 0.375382, 1.181787]
