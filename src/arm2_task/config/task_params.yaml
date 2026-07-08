@@ -100,7 +100,7 @@
         prefer_tf: true
         parent_frame: base_link
         child_frame: lidar_link
-        translation: [0.127, 0.0, 0.0]  # youbaote是0.25
+        translation: [0.250, 0.0, 0.0]  # youbaote是0.25
         rotation_rpy: [0.0, 0.0, 0.0]
       # 调试阶段手动指定的地图任务点，作为 nav topic 缺失时的本地副本。
       ids: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
