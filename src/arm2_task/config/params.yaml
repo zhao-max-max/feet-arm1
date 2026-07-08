@@ -29,8 +29,8 @@
     dog_camera_extrinsics:
       parent_frame: world
       child_frame: dog_camera_link
-      pos: [0.101263, 0.046662, -0.032759]
-      quat: [-0.57775393, 0.64149970, -0.36065040, 0.35300115]
+      pos: [0.22476, 0.21614, 0.17631]
+      quat: [-0.85355339, -0.35355339, 0.14644661, 0.35355339]
 
     # 动力学与摩擦力补偿参数。
     # tau_f = fc * tanh(alpha * dq) + fv * dq
