@@ -92,7 +92,8 @@ NavTaskInterface::NavTaskInterface(
       }
       if (request->action == "pickup" &&
           current_state != arm2_task::TaskState::IDLE &&
-          current_state != arm2_task::TaskState::LOOKOUT) {
+          current_state != arm2_task::TaskState::LOOKOUT &&
+          current_state != arm2_task::TaskState::STORED) {
         response->success = false;
         response->message = "arm is not ready for pickup";
         publish_mission_response_debug(*response);
@@ -124,13 +125,15 @@ NavTaskInterface::NavTaskInterface(
           request->task_index, request->point_id, static_cast<int>(current_state));
         return;
       }
-      if (request->action == "place2" && current_state != arm2_task::TaskState::STORED) {
+      if (request->action == "place2" &&
+          current_state != arm2_task::TaskState::STORED &&
+          current_state != arm2_task::TaskState::IDLE) {
         response->success = false;
-        response->message = "arm has no stored box";
+        response->message = "arm is not idle or stored";
         publish_mission_response_debug(*response);
         RCLCPP_WARN(
           node_->get_logger(),
-          "[nav] Rejected place2 task_index=%u point_id=%d: arm state=%d, expected STORED.",
+          "[nav] Rejected place2 task_index=%u point_id=%d: arm state=%d, expected STORED/IDLE.",
           request->task_index, request->point_id, static_cast<int>(current_state));
         return;
       }
@@ -830,12 +833,23 @@ bool NavTaskInterface::do_store_sequence(const MissionCommand & command)
   }
   clear_active_ready_command();
 
-  if (!sequences_->store_to_dog()) {
-    publish_timing_event(
-      node_, timing_event_pub_, "mission", "store_sequence", "end",
-      detail.str() + ",ok=0,reason=store_to_dog_failed");
-    return false;
+  // Visual grasp + radar fallback (same pattern as do_grasp_sequence)
+  bool grasp_ok = sequences_->grasp_from_current_view();
+  if (!grasp_ok) {
+    RCLCPP_WARN(
+      node_->get_logger(),
+      "[nav] pickup2 visual grasp failed for task_index=%u; trying radar fallback.",
+      command.task_index);
+    if (!do_radar_pick_fallback(command)) {
+      publish_timing_event(
+        node_, timing_event_pub_, "mission", "store_sequence", "end",
+        detail.str() + ",ok=0,reason=grasp_failed");
+      return false;
+    }
   }
+
+  // Hand off box to dog suction cup
+  sequences_->handoff_to_dog();
 
   send_nav_event("stored");
   send_nav_event("completed");
@@ -852,12 +866,59 @@ bool NavTaskInterface::do_pickup_from_dog_sequence(const MissionCommand & comman
   publish_timing_event(
     node_, timing_event_pub_, "mission", "pickup_from_dog_sequence", "begin", detail.str());
 
-  if (!sequences_->pickup_from_dog_and_place()) {
+  // Step 1: move to store pose, release dog suction, arm takes box
+  if (!sequences_->pickup_from_dog()) {
     publish_timing_event(
       node_, timing_event_pub_, "mission", "pickup_from_dog_sequence", "end",
       detail.str() + ",ok=0,reason=pickup_from_dog_failed");
     return false;
   }
+
+  // Step 2: place with visual perception + radar fallback (same as do_place_sequence)
+  bool place_ok = sequences_->place_from_perception();
+
+  if (!place_ok) {
+    RCLCPP_WARN(
+      node_->get_logger(),
+      "[nav] place2 visual place failed for task_index=%u; falling back to radar pose.",
+      command.task_index);
+
+    arm2_task::task::RelativePlanarPose relative_pose;
+    if (!compute_command_relative_pose(command, &relative_pose)) {
+      RCLCPP_ERROR(
+        node_->get_logger(),
+        "[nav] place2 fallback failed: unable to compute arm-relative pose for task_index=%u.",
+        command.task_index);
+      publish_timing_event(
+        node_, timing_event_pub_, "mission", "pickup_from_dog_sequence", "end",
+        detail.str() + ",ok=0,reason=fallback_relative_pose_failed");
+      primitives_->do_reset();
+      primitives_->do_dog_suction_on();
+      return false;
+    }
+
+    geometry_msgs::msg::Pose fallback_pose;
+    fallback_pose.position.x = relative_pose.x;
+    fallback_pose.position.y = relative_pose.y;
+    fallback_pose.position.z = config_.place_height;
+    fallback_pose.orientation.x = 0.0;
+    fallback_pose.orientation.y = 0.0;
+    fallback_pose.orientation.z = std::sin(relative_pose.yaw / 2.0);
+    fallback_pose.orientation.w = std::cos(relative_pose.yaw / 2.0);
+
+    place_ok = sequences_->place_pose_direct_height(fallback_pose);
+    if (!place_ok) {
+      publish_timing_event(
+        node_, timing_event_pub_, "mission", "pickup_from_dog_sequence", "end",
+        detail.str() + ",ok=0,reason=fallback_place_failed");
+      primitives_->do_reset();
+      primitives_->do_dog_suction_on();
+      return false;
+    }
+  }
+
+  primitives_->do_reset();
+  primitives_->do_dog_suction_on();
 
   rclcpp::sleep_for(500ms);
   send_nav_event("placed");
@@ -899,7 +960,9 @@ bool NavTaskInterface::execute_mission_command(const MissionCommand & command)
   }
 
   if (command.action == "pickup") {
-    if (state_ != arm2_task::TaskState::IDLE && state_ != arm2_task::TaskState::LOOKOUT) {
+    if (state_ != arm2_task::TaskState::IDLE &&
+        state_ != arm2_task::TaskState::LOOKOUT &&
+        state_ != arm2_task::TaskState::STORED) {
       RCLCPP_WARN(
         node_->get_logger(),
         "[nav] Pickup command ignored because arm state is %d, expected IDLE/LOOKOUT.",
@@ -978,10 +1041,11 @@ bool NavTaskInterface::execute_mission_command(const MissionCommand & command)
   }
 
   if (command.action == "place2") {
-    if (state_ != arm2_task::TaskState::STORED) {
+    if (state_ != arm2_task::TaskState::STORED &&
+        state_ != arm2_task::TaskState::IDLE) {
       RCLCPP_WARN(
         node_->get_logger(),
-        "[nav] place2 ignored because arm state is %d, expected STORED.",
+        "[nav] place2 ignored because arm state is %d, expected STORED/IDLE.",
         static_cast<int>(state_));
       publish_timing_event(
         node_, timing_event_pub_, "mission", "execute_command", "end",

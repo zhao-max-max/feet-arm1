@@ -246,7 +246,10 @@ void TaskPrimitives::do_load()
 void TaskPrimitives::do_store_pose()
 {
   publish_timing_event(node_, timing_event_pub_, "action", "store_pose", "begin");
-  RCLCPP_INFO(node_->get_logger(), "[store_pose] moving -> store preset -> moving");
+  RCLCPP_INFO(
+    node_->get_logger(),
+    "[store_pose] moving -> hover above store -> descend to store preset -> moving");
+
   if (!request_mode_switch("moving")) {
     publish_timing_event(
       node_, timing_event_pub_, "action", "store_pose", "end", "ok=0,reason=mode_moving_failed");
@@ -258,15 +261,53 @@ void TaskPrimitives::do_store_pose()
       node_, timing_event_pub_, "action", "store_pose", "end", "ok=0,reason=missing_preset");
     return;
   }
-  bool ok = true;
-  if (send_move_goal({presets_->at("store")})) {
-    ok = wait_for_action_completion();
-  } else {
-    ok = false;
+
+  const Eigen::VectorXd & q_store = presets_->at("store");
+
+  // Use FK to find the end-effector position at the store preset,
+  // then build a hover waypoint directly above it.
+  const auto store_se3 = kin_engine_->forwardKinematics(q_store);
+  const Eigen::Vector3d store_pos = store_se3.translation();
+  const Eigen::Vector3d hover_pos(
+    store_pos.x(), store_pos.y(), store_pos.z() + config_.store_hover_offset);
+
+  // Keep the same orientation (pitch/roll) as the store preset for the hover IK.
+  // Extract pitch from the store joint angles: pitch ≈ sum of joint angles that
+  // form the wrist pitch. Use the same grasp_pitch convention for consistency.
+  const double pitch = config_.grasp_pitch + config_.tool_pitch_offset;
+  const double roll  = q_store[4];  // joint_4 of the store preset
+
+  Eigen::VectorXd q_hover(5);
+  if (!kin_engine_->solveIK(hover_pos, pitch, roll, q_hover)) {
+    RCLCPP_WARN(
+      node_->get_logger(),
+      "[store_pose] IK failed for hover (%.3f, %.3f, %.3f); going directly to store preset.",
+      hover_pos.x(), hover_pos.y(), hover_pos.z());
+    // Fall back: go straight to store preset without hover
+    bool ok = send_move_goal(std::vector<Eigen::VectorXd>{q_store}) && wait_for_action_completion();
+    request_mode_switch("moving");
+    publish_timing_event(
+      node_, timing_event_pub_, "action", "store_pose", "end",
+      std::string("ok=") + timing_bool(ok) + ",hover=0");
+    return;
   }
+
+  RCLCPP_INFO(
+    node_->get_logger(),
+    "[store_pose] hover-z=%.3f store-z=%.3f pitch=%.2f roll=%.2f roll_offset=%.2f",
+    hover_pos.z(), store_pos.z(), pitch, roll, config_.store_roll_offset);
+
+  // Apply roll offset to both waypoints (relative to store preset joint_4)
+  Eigen::VectorXd q_hover_final = q_hover;
+  Eigen::VectorXd q_store_final = q_store;
+  q_hover_final[4] += config_.store_roll_offset;
+  q_store_final[4] += config_.store_roll_offset;
+
+  bool ok = send_move_goal(std::vector<Eigen::VectorXd>{q_hover_final, q_store_final}) && wait_for_action_completion();
   request_mode_switch("moving");
   publish_timing_event(
-    node_, timing_event_pub_, "action", "store_pose", "end", std::string("ok=") + timing_bool(ok));
+    node_, timing_event_pub_, "action", "store_pose", "end",
+    std::string("ok=") + timing_bool(ok) + ",hover=1");
 }
 
 void TaskPrimitives::do_dog_suction_on()

@@ -306,11 +306,52 @@ bool TaskSequences::move_to_carry_loaded()
   return true;
 }
 
+bool TaskSequences::handoff_to_dog()
+{
+  publish_timing_event(node_, timing_event_pub_, "sequence", "handoff_to_dog", "begin");
+
+  // Move to store preset with hover descent
+  primitives_->do_store_pose();
+
+  // Hand off: arm suction OFF, dog suction ON
+  primitives_->do_suction_off();
+  primitives_->do_dog_suction_on();
+
+  // Retreat path: raise up at store's joint_0 → rotate to reset's joint_0 → descend to reset.
+  // This avoids sweeping the arm sideways at low height and hitting the box.
+  if (presets_->count("store_retreat") && presets_->count("reset")) {
+    const Eigen::VectorXd & q_retreat = presets_->at("store_retreat");
+    const Eigen::VectorXd & q_reset = presets_->at("reset");
+
+    // Waypoint 1: raise arm at store's yaw (store_retreat keeps store's j0 but arm high)
+    // Waypoint 2: rotate to reset's yaw while staying high
+    Eigen::VectorXd q_rotate(5);
+    q_rotate[0] = q_reset[0];     // rotate to front
+    q_rotate[1] = q_retreat[1];   // still high
+    q_rotate[2] = q_retreat[2];
+    q_rotate[3] = q_retreat[3];
+    q_rotate[4] = q_retreat[4];
+
+    RCLCPP_INFO(
+      node_->get_logger(),
+      "[handoff_to_dog] retreat: raise at j0=%.1f deg -> rotate to j0=%.1f deg -> reset",
+      q_retreat[0] * 180.0 / M_PI, q_reset[0] * 180.0 / M_PI);
+
+    motion_client_->request_mode_switch("moving");
+    motion_client_->send_move_goal(std::vector<Eigen::VectorXd>{q_retreat, q_rotate, q_reset});
+    motion_client_->wait_for_action_completion();
+  } else {
+    primitives_->do_reset();
+  }
+
+  publish_timing_event(node_, timing_event_pub_, "sequence", "handoff_to_dog", "end", "ok=1");
+  return true;
+}
+
 bool TaskSequences::store_to_dog()
 {
   publish_timing_event(node_, timing_event_pub_, "sequence", "store_to_dog", "begin");
 
-  // Grasp box (arm suction ON, loaded mode)
   if (!primitives_->do_grasp_from_current_view()) {
     publish_timing_event(
       node_, timing_event_pub_, "sequence", "store_to_dog", "end",
@@ -318,18 +359,25 @@ bool TaskSequences::store_to_dog()
     return false;
   }
 
-  // Move to store preset (hand-off position above dog suction cup)
-  primitives_->do_store_pose();
-
-  // Hand off: arm suction OFF (also switches to moving mode), then dog suction ON
-  primitives_->do_suction_off();
-  primitives_->do_dog_suction_on();
-
-  // Return to reset
-  primitives_->do_reset();
+  handoff_to_dog();
 
   publish_timing_event(
     node_, timing_event_pub_, "sequence", "store_to_dog", "end", "ok=1");
+  return true;
+}
+
+bool TaskSequences::pickup_from_dog()
+{
+  publish_timing_event(node_, timing_event_pub_, "sequence", "pickup_from_dog", "begin");
+
+  // Move to store preset to reach box on dog suction cup
+  primitives_->do_store_pose();
+
+  // Release dog suction, arm takes the box
+  primitives_->do_dog_suction_off();
+  primitives_->do_suction_on();  // 400ms settle + arm suction ON + loaded mode
+
+  publish_timing_event(node_, timing_event_pub_, "sequence", "pickup_from_dog", "end", "ok=1");
   return true;
 }
 
@@ -337,27 +385,25 @@ bool TaskSequences::pickup_from_dog_and_place()
 {
   publish_timing_event(node_, timing_event_pub_, "sequence", "pickup_from_dog_and_place", "begin");
 
-  // Move to store preset to reach box on dog suction cup
-  primitives_->do_store_pose();
+  if (!pickup_from_dog()) {
+    publish_timing_event(
+      node_, timing_event_pub_, "sequence", "pickup_from_dog_and_place", "end",
+      "ok=0,reason=pickup_from_dog_failed");
+    return false;
+  }
 
-  // Release dog suction, then arm takes the box
-  primitives_->do_dog_suction_off();
-  primitives_->do_suction_on();  // 400ms settle + arm suction ON + loaded mode
-
-  // Place the box using perception (same as normal place sequence)
+  // Place using perception
   const bool place_ok = place_from_perception();
   if (!place_ok) {
     publish_timing_event(
       node_, timing_event_pub_, "sequence", "pickup_from_dog_and_place", "end",
       "ok=0,reason=place_failed");
-    // Still reset and re-enable dog suction even on failure
     primitives_->do_reset();
     primitives_->do_dog_suction_on();
     return false;
   }
 
   primitives_->do_reset();
-  // Re-enable dog suction (ready for next cycle)
   primitives_->do_dog_suction_on();
 
   publish_timing_event(

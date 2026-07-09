@@ -25,9 +25,11 @@
       load: [0.0, 90.0, -80.0, -90.0, 0.0]
       look_out: [0.0, 90.0, -145.0, 0.0, 0.0]
       reset: [0.0, 95.0, -170.0, 10.0, 0.0]
-      carry: [140.0, 175.0, -140.0, 10.0, 0.0]
+      carry: [40.0, 175.0, -140.0, 10.0, 0.0]
       # 狗背交接预设：臂带箱子移到狗背吸盘正上方的中间姿态，需根据实机调整
-      store: [0.0, 95.0, -170.0, 10.0, 0.0]
+      store: [135.0, 95.0, -80.0, -70.0, 0.0]
+      # store 后撤退高位：store 方向不变但末端抬高，用于放完箱子后安全离开
+      store_retreat: [135.0, 90.0, -80.0, 0.0, 0.0]
 
     task:
       require_payload_service: false
@@ -51,7 +53,7 @@
       pre_grasp_offset: 0.10
       tool_offset_x: 0.0
       tool_offset_y: 0.0
-      tool_offset_z: 0.0
+      tool_offset_z: -0.10
       tool_tip_length: 0.0
       pick_object_name: "box"
       use_mock_target: false
@@ -87,10 +89,14 @@
       mock_z: 0.1
       mock_yaw: 0.0
 
+    task_store:
+      hover_offset: 0.10  # 悬停在 store 预设末端上方的高度 (m)，竖直下降到交接点
+      roll_offset_deg: 0.0  # 放到狗吸盘时 joint_4 在当前状态基础上的附加转角 (度)
+
     task_nav:
       state_topic: /navigation/state
       task_points_topic: /navigation/task_points
-      place_height: -0.10
+      place_height: 0.0
       # 视觉 get_pick_pos 异常时，用当前 nav 任务点 x/y 生成 pickup 兜底目标。
       # target_z 会继续叠加 task_step6.object_height / tool_offset_z / tool_tip_length。
       radar_pick_fallback:

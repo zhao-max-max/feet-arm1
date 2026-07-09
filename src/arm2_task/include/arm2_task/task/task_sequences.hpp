@@ -65,6 +65,8 @@ public:
 
   bool move_to_carry_loaded();
   bool store_to_dog();
+  bool handoff_to_dog();            // store_to_dog 的后半段：store pose + 吸盘交接 + reset
+  bool pickup_from_dog();
   bool pickup_from_dog_and_place();
 
 private:
