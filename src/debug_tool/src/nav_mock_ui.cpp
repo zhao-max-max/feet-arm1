@@ -1266,6 +1266,8 @@ private:
     action_combo_->addItem(QStringLiteral("ready"));
     action_combo_->addItem(QStringLiteral("pickup"));
     action_combo_->addItem(QStringLiteral("place"));
+    action_combo_->addItem(QStringLiteral("pickup2"));
+    action_combo_->addItem(QStringLiteral("place2"));
     task_index_spin_ = new QSpinBox(group);
     task_index_spin_->setRange(0, 1000000);
     point_id_spin_ = new QSpinBox(group);
