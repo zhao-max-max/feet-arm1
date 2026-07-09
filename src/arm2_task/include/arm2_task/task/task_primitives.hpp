@@ -70,6 +70,9 @@ public:
   void do_reset();
   void do_reset_suction();
   void do_load();
+  void do_store_pose();
+  void do_dog_suction_on();
+  void do_dog_suction_off();
   bool do_look_out(const geometry_msgs::msg::Pose & target);
   void do_suction_on();
   void do_suction_off();

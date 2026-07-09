@@ -17,10 +17,12 @@ public:
   EndEffectorClient(
     rclcpp::Node * node,
     rclcpp::Client<robot_msgs::srv::SetSuction>::SharedPtr suction_client,
+    rclcpp::Client<robot_msgs::srv::SetSuction>::SharedPtr dog_suction_client,
     rclcpp::Client<robot_msgs::srv::GetPayloadEstimate>::SharedPtr payload_client,
     rclcpp::Client<robot_msgs::srv::SetPayloadState>::SharedPtr payload_state_client);
 
   int set_suction(bool activate, bool required);
+  int set_dog_suction(bool activate, bool required);
 
   bool request_payload_estimate(double * out_mass);
 
@@ -34,6 +36,7 @@ public:
 private:
   rclcpp::Node * node_{nullptr};
   rclcpp::Client<robot_msgs::srv::SetSuction>::SharedPtr suction_client_;
+  rclcpp::Client<robot_msgs::srv::SetSuction>::SharedPtr dog_suction_client_;
   rclcpp::Client<robot_msgs::srv::GetPayloadEstimate>::SharedPtr payload_client_;
   rclcpp::Client<robot_msgs::srv::SetPayloadState>::SharedPtr payload_state_client_;
 };

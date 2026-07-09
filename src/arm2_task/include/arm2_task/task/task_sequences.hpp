@@ -64,6 +64,8 @@ public:
   bool stack_pose(const geometry_msgs::msg::Pose & box_top_pose);
 
   bool move_to_carry_loaded();
+  bool store_to_dog();
+  bool pickup_from_dog_and_place();
 
 private:
   static geometry_msgs::msg::Pose make_forward_pose();

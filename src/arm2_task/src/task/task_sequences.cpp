@@ -306,4 +306,63 @@ bool TaskSequences::move_to_carry_loaded()
   return true;
 }
 
+bool TaskSequences::store_to_dog()
+{
+  publish_timing_event(node_, timing_event_pub_, "sequence", "store_to_dog", "begin");
+
+  // Grasp box (arm suction ON, loaded mode)
+  if (!primitives_->do_grasp_from_current_view()) {
+    publish_timing_event(
+      node_, timing_event_pub_, "sequence", "store_to_dog", "end",
+      "ok=0,reason=grasp_failed");
+    return false;
+  }
+
+  // Move to store preset (hand-off position above dog suction cup)
+  primitives_->do_store_pose();
+
+  // Hand off: arm suction OFF (also switches to moving mode), then dog suction ON
+  primitives_->do_suction_off();
+  primitives_->do_dog_suction_on();
+
+  // Return to reset
+  primitives_->do_reset();
+
+  publish_timing_event(
+    node_, timing_event_pub_, "sequence", "store_to_dog", "end", "ok=1");
+  return true;
+}
+
+bool TaskSequences::pickup_from_dog_and_place()
+{
+  publish_timing_event(node_, timing_event_pub_, "sequence", "pickup_from_dog_and_place", "begin");
+
+  // Move to store preset to reach box on dog suction cup
+  primitives_->do_store_pose();
+
+  // Release dog suction, then arm takes the box
+  primitives_->do_dog_suction_off();
+  primitives_->do_suction_on();  // 400ms settle + arm suction ON + loaded mode
+
+  // Place the box using perception (same as normal place sequence)
+  const bool place_ok = place_from_perception();
+  if (!place_ok) {
+    publish_timing_event(
+      node_, timing_event_pub_, "sequence", "pickup_from_dog_and_place", "end",
+      "ok=0,reason=place_failed");
+    // Still reset and re-enable dog suction even on failure
+    primitives_->do_reset();
+    primitives_->do_dog_suction_on();
+    return false;
+  }
+
+  primitives_->do_reset();
+  // Re-enable dog suction (ready for next cycle)
+  primitives_->do_dog_suction_on();
+
+  publish_timing_event(
+    node_, timing_event_pub_, "sequence", "pickup_from_dog_and_place", "end", "ok=1");
+  return true;
+}
+
 }  // namespace arm2_task::task

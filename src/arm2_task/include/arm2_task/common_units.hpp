@@ -7,7 +7,7 @@
 namespace arm2_task {
 
 enum class TaskState {
-    IDLE, LOOKOUT, OVERLOOK, GRASPING, HOLDING, PLACING, FAULT
+    IDLE, LOOKOUT, OVERLOOK, GRASPING, HOLDING, PLACING, STORED, FAULT
 };
 
 enum class ArmEvent {

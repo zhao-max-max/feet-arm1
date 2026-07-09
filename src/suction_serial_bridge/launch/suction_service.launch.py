@@ -7,6 +7,7 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     config_path = Path(get_package_share_directory("suction_serial_bridge")) / "config" / "suction_service.yaml"
+    dog_config_path = Path(get_package_share_directory("suction_serial_bridge")) / "config" / "dog_suction_service.yaml"
     return LaunchDescription([
         Node(
             package="suction_serial_bridge",
@@ -14,5 +15,12 @@ def generate_launch_description():
             name="suction_service_node",
             output="screen",
             parameters=[str(config_path)],
-        )
+        ),
+        Node(
+            package="suction_serial_bridge",
+            executable="suction_service_node",
+            name="dog_suction_service_node",
+            output="screen",
+            parameters=[str(dog_config_path)],
+        ),
     ])

@@ -243,6 +243,53 @@ void TaskPrimitives::do_load()
     node_, timing_event_pub_, "action", "load", "end", std::string("ok=") + timing_bool(ok));
 }
 
+void TaskPrimitives::do_store_pose()
+{
+  publish_timing_event(node_, timing_event_pub_, "action", "store_pose", "begin");
+  RCLCPP_INFO(node_->get_logger(), "[store_pose] moving -> store preset -> moving");
+  if (!request_mode_switch("moving")) {
+    publish_timing_event(
+      node_, timing_event_pub_, "action", "store_pose", "end", "ok=0,reason=mode_moving_failed");
+    return;
+  }
+  if (!presets_->count("store")) {
+    RCLCPP_ERROR(node_->get_logger(), "Preset 'store' not found!");
+    publish_timing_event(
+      node_, timing_event_pub_, "action", "store_pose", "end", "ok=0,reason=missing_preset");
+    return;
+  }
+  bool ok = true;
+  if (send_move_goal({presets_->at("store")})) {
+    ok = wait_for_action_completion();
+  } else {
+    ok = false;
+  }
+  request_mode_switch("moving");
+  publish_timing_event(
+    node_, timing_event_pub_, "action", "store_pose", "end", std::string("ok=") + timing_bool(ok));
+}
+
+void TaskPrimitives::do_dog_suction_on()
+{
+  publish_timing_event(node_, timing_event_pub_, "action", "dog_suction_on", "begin");
+  RCLCPP_INFO(node_->get_logger(), "[dog_suction] ON");
+  rclcpp::sleep_for(std::chrono::milliseconds(400));
+  const bool ok = end_effector_client_->set_dog_suction(true, false) != 0;
+  publish_timing_event(
+    node_, timing_event_pub_, "action", "dog_suction_on", "end",
+    std::string("ok=") + timing_bool(ok));
+}
+
+void TaskPrimitives::do_dog_suction_off()
+{
+  publish_timing_event(node_, timing_event_pub_, "action", "dog_suction_off", "begin");
+  RCLCPP_INFO(node_->get_logger(), "[dog_suction] OFF");
+  const bool ok = end_effector_client_->set_dog_suction(false, false) != 0;
+  publish_timing_event(
+    node_, timing_event_pub_, "action", "dog_suction_off", "end",
+    std::string("ok=") + timing_bool(ok));
+}
+
 bool TaskPrimitives::do_look_out(const geometry_msgs::msg::Pose & target)
 {
   std::ostringstream detail;

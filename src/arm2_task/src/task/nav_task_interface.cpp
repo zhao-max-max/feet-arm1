@@ -54,7 +54,9 @@ NavTaskInterface::NavTaskInterface(
       }
 
       if (!request ||
-          (request->action != "ready" && request->action != "pickup" && request->action != "place")) {
+          (request->action != "ready" && request->action != "pickup" &&
+           request->action != "place" && request->action != "pickup2" &&
+           request->action != "place2")) {
         response->success = false;
         response->message = "invalid mission action";
         publish_mission_response_debug(*response);
@@ -107,6 +109,28 @@ NavTaskInterface::NavTaskInterface(
         RCLCPP_WARN(
           node_->get_logger(),
           "[nav] Rejected place task_index=%u point_id=%d: arm state=%d, expected HOLDING.",
+          request->task_index, request->point_id, static_cast<int>(current_state));
+        return;
+      }
+      if (request->action == "pickup2" &&
+          current_state != arm2_task::TaskState::IDLE &&
+          current_state != arm2_task::TaskState::LOOKOUT) {
+        response->success = false;
+        response->message = "arm is not idle";
+        publish_mission_response_debug(*response);
+        RCLCPP_WARN(
+          node_->get_logger(),
+          "[nav] Rejected pickup2 task_index=%u point_id=%d: arm state=%d, expected IDLE/LOOKOUT.",
+          request->task_index, request->point_id, static_cast<int>(current_state));
+        return;
+      }
+      if (request->action == "place2" && current_state != arm2_task::TaskState::STORED) {
+        response->success = false;
+        response->message = "arm has no stored box";
+        publish_mission_response_debug(*response);
+        RCLCPP_WARN(
+          node_->get_logger(),
+          "[nav] Rejected place2 task_index=%u point_id=%d: arm state=%d, expected STORED.",
           request->task_index, request->point_id, static_cast<int>(current_state));
         return;
       }
@@ -237,6 +261,8 @@ const char * NavTaskInterface::task_state_name(arm2_task::TaskState state) const
       return "HOLDING";
     case arm2_task::TaskState::PLACING:
       return "PLACING";
+    case arm2_task::TaskState::STORED:
+      return "STORED";
     case arm2_task::TaskState::FAULT:
       return "FAULT";
   }
@@ -723,8 +749,7 @@ bool NavTaskInterface::do_ready_sequence(const MissionCommand & command)
   return true;
 }
 
-bool NavTaskInterface::do_place_sequence(const MissionCommand & command)
-{
+bool NavTaskInterface::do_place_sequence(const MissionCommand & command){
   std::ostringstream detail;
   detail << "task_index=" << command.task_index
          << ",point_id=" << command.point_id
@@ -787,6 +812,58 @@ bool NavTaskInterface::do_place_sequence(const MissionCommand & command)
   send_nav_event("completed");
   publish_timing_event(
     node_, timing_event_pub_, "mission", "place_sequence", "end",
+    detail.str() + ",ok=1");
+  return true;
+}
+
+bool NavTaskInterface::do_store_sequence(const MissionCommand & command)
+{
+  std::ostringstream detail;
+  detail << "task_index=" << command.task_index << ",point_id=" << command.point_id;
+  publish_timing_event(node_, timing_event_pub_, "mission", "store_sequence", "begin", detail.str());
+
+  if (!do_pickup_lookout_align(command)) {
+    publish_timing_event(
+      node_, timing_event_pub_, "mission", "store_sequence", "end",
+      detail.str() + ",ok=0,reason=lookout_align_failed");
+    return false;
+  }
+  clear_active_ready_command();
+
+  if (!sequences_->store_to_dog()) {
+    publish_timing_event(
+      node_, timing_event_pub_, "mission", "store_sequence", "end",
+      detail.str() + ",ok=0,reason=store_to_dog_failed");
+    return false;
+  }
+
+  send_nav_event("stored");
+  send_nav_event("completed");
+  publish_timing_event(
+    node_, timing_event_pub_, "mission", "store_sequence", "end",
+    detail.str() + ",ok=1");
+  return true;
+}
+
+bool NavTaskInterface::do_pickup_from_dog_sequence(const MissionCommand & command)
+{
+  std::ostringstream detail;
+  detail << "task_index=" << command.task_index << ",point_id=" << command.point_id;
+  publish_timing_event(
+    node_, timing_event_pub_, "mission", "pickup_from_dog_sequence", "begin", detail.str());
+
+  if (!sequences_->pickup_from_dog_and_place()) {
+    publish_timing_event(
+      node_, timing_event_pub_, "mission", "pickup_from_dog_sequence", "end",
+      detail.str() + ",ok=0,reason=pickup_from_dog_failed");
+    return false;
+  }
+
+  rclcpp::sleep_for(500ms);
+  send_nav_event("placed");
+  send_nav_event("completed");
+  publish_timing_event(
+    node_, timing_event_pub_, "mission", "pickup_from_dog_sequence", "end",
     detail.str() + ",ok=1");
   return true;
 }
@@ -871,6 +948,58 @@ bool NavTaskInterface::execute_mission_command(const MissionCommand & command)
     publish_timing_event(
       node_, timing_event_pub_, "mission", "execute_command", "end",
       detail.str() + ",ok=0,reason=place_sequence_failed");
+    return false;
+  }
+
+  if (command.action == "pickup2") {
+    if (state_ != arm2_task::TaskState::IDLE && state_ != arm2_task::TaskState::LOOKOUT) {
+      RCLCPP_WARN(
+        node_->get_logger(),
+        "[nav] pickup2 ignored because arm state is %d, expected IDLE/LOOKOUT.",
+        static_cast<int>(state_));
+      publish_timing_event(
+        node_, timing_event_pub_, "mission", "execute_command", "end",
+        detail.str() + ",ok=0,reason=invalid_state");
+      return false;
+    }
+
+    RCLCPP_INFO(node_->get_logger(), "[nav] Executing store sequence (pickup2)...");
+    if (do_store_sequence(command)) {
+      set_task_state(arm2_task::TaskState::STORED, "pickup2_complete");
+      publish_timing_event(
+        node_, timing_event_pub_, "mission", "execute_command", "end",
+        detail.str() + ",ok=1");
+      return true;
+    }
+    publish_timing_event(
+      node_, timing_event_pub_, "mission", "execute_command", "end",
+      detail.str() + ",ok=0,reason=store_sequence_failed");
+    return false;
+  }
+
+  if (command.action == "place2") {
+    if (state_ != arm2_task::TaskState::STORED) {
+      RCLCPP_WARN(
+        node_->get_logger(),
+        "[nav] place2 ignored because arm state is %d, expected STORED.",
+        static_cast<int>(state_));
+      publish_timing_event(
+        node_, timing_event_pub_, "mission", "execute_command", "end",
+        detail.str() + ",ok=0,reason=invalid_state");
+      return false;
+    }
+
+    RCLCPP_INFO(node_->get_logger(), "[nav] Executing pickup-from-dog-and-place sequence (place2)...");
+    if (do_pickup_from_dog_sequence(command)) {
+      set_task_state(arm2_task::TaskState::IDLE, "place2_complete");
+      publish_timing_event(
+        node_, timing_event_pub_, "mission", "execute_command", "end",
+        detail.str() + ",ok=1");
+      return true;
+    }
+    publish_timing_event(
+      node_, timing_event_pub_, "mission", "execute_command", "end",
+      detail.str() + ",ok=0,reason=pickup_from_dog_sequence_failed");
     return false;
   }
 

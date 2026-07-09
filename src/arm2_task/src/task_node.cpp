@@ -240,6 +240,7 @@ public:
     place_client_ = this->create_client<robot_msgs::srv::GetPlacePos>("get_place_pos");
     stack_client_ = this->create_client<robot_msgs::srv::GetPlacePos>("get_stack_pos");
     suction_client_ = this->create_client<robot_msgs::srv::SetSuction>("set_suction");
+    dog_suction_client_ = this->create_client<robot_msgs::srv::SetSuction>("set_dog_suction");
     mode_client_ = this->create_client<robot_msgs::srv::SetControllerMode>("set_controller_mode");
     payload_client_ = this->create_client<robot_msgs::srv::GetPayloadEstimate>("get_payload_estimate");
     payload_state_client_ = this->create_client<robot_msgs::srv::SetPayloadState>(payload_service_name_);
@@ -251,7 +252,7 @@ public:
     perception_client_ = std::make_unique<arm2_task::task::PerceptionClient>(
         this, tf_buffer_, pick_client_, place_client_, stack_client_);
     end_effector_client_ = std::make_unique<arm2_task::task::EndEffectorClient>(
-        this, suction_client_, payload_client_, payload_state_client_);
+        this, suction_client_, dog_suction_client_, payload_client_, payload_state_client_);
 
     arm2_task::task::TaskPrimitives::Config primitive_config;
     primitive_config.require_suction_service = require_suction_service_;
@@ -568,6 +569,7 @@ private:
   rclcpp::Client<robot_msgs::srv::GetPlacePos>::SharedPtr place_client_;
   rclcpp::Client<robot_msgs::srv::GetPlacePos>::SharedPtr stack_client_;
   rclcpp::Client<robot_msgs::srv::SetSuction>::SharedPtr suction_client_;
+  rclcpp::Client<robot_msgs::srv::SetSuction>::SharedPtr dog_suction_client_;
   rclcpp::Client<robot_msgs::srv::SetControllerMode>::SharedPtr mode_client_;
   rclcpp::Client<robot_msgs::srv::GetPayloadEstimate>::SharedPtr payload_client_;
   rclcpp::Client<robot_msgs::srv::SetPayloadState>::SharedPtr payload_state_client_;

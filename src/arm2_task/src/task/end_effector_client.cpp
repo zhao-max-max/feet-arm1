@@ -11,10 +11,12 @@ namespace arm2_task::task
 EndEffectorClient::EndEffectorClient(
   rclcpp::Node * node,
   rclcpp::Client<robot_msgs::srv::SetSuction>::SharedPtr suction_client,
+  rclcpp::Client<robot_msgs::srv::SetSuction>::SharedPtr dog_suction_client,
   rclcpp::Client<robot_msgs::srv::GetPayloadEstimate>::SharedPtr payload_client,
   rclcpp::Client<robot_msgs::srv::SetPayloadState>::SharedPtr payload_state_client)
 : node_(node),
   suction_client_(std::move(suction_client)),
+  dog_suction_client_(std::move(dog_suction_client)),
   payload_client_(std::move(payload_client)),
   payload_state_client_(std::move(payload_state_client))
 {
@@ -51,6 +53,40 @@ int EndEffectorClient::set_suction(bool activate, bool required)
   }
 
   RCLCPP_INFO(node_->get_logger(), "Suction %s", activate ? "ON" : "OFF");
+  return 1;
+}
+
+int EndEffectorClient::set_dog_suction(bool activate, bool required)
+{
+  if (!dog_suction_client_->wait_for_service(1s)) {
+    if (required) {
+      RCLCPP_ERROR(node_->get_logger(), "Required dog suction service is not available.");
+      return 0;
+    }
+    RCLCPP_INFO(
+      node_->get_logger(),
+      "Optional dog suction service unavailable; skipping command.");
+    return 1;
+  }
+
+  auto request = std::make_shared<robot_msgs::srv::SetSuction::Request>();
+  request->activate = activate;
+
+  auto result_future = dog_suction_client_->async_send_request(request);
+  if (result_future.wait_for(2s) != std::future_status::ready) {
+    RCLCPP_ERROR(
+      node_->get_logger(), "Dog suction command [%s] timed out.", activate ? "ON" : "OFF");
+    return 0;
+  }
+
+  const auto response = result_future.get();
+  if (!response || !response->success) {
+    RCLCPP_ERROR(
+      node_->get_logger(), "Dog suction command [%s] failed.", activate ? "ON" : "OFF");
+    return 0;
+  }
+
+  RCLCPP_INFO(node_->get_logger(), "Dog suction %s", activate ? "ON" : "OFF");
   return 1;
 }
 

@@ -68,6 +68,8 @@ private:
   bool do_grasp_sequence(const MissionCommand & command);
   bool do_radar_pick_fallback(const MissionCommand & command);
   bool do_place_sequence(const MissionCommand & command);
+  bool do_store_sequence(const MissionCommand & command);
+  bool do_pickup_from_dog_sequence(const MissionCommand & command);
   bool execute_mission_command(const MissionCommand & command);
   void cache_active_ready_command(const MissionCommand & command);
   void clear_active_ready_command();

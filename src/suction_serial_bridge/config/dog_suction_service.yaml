@@ -1,0 +1,6 @@
+suction_service_node:
+  ros__parameters:
+    serial_port: /dev/esp32_dog_suction
+    baud_rate: 115200
+    service_name: set_dog_suction
+    response_timeout_ms: 500
