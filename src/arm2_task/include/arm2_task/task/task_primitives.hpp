@@ -47,6 +47,7 @@ public:
     double stack_roll_sign{1.0};
     double store_hover_offset{0.10};  // 狗背交接时悬停高度偏移 (m)
     double store_roll_offset{0.0};    // 放到狗吸盘时 joint_4 附加转角 (rad)
+    double grasp_roll_offset{0.0};    // 抓取时 joint_4 roll 附加偏置 (rad)
   };
 
   TaskPrimitives(

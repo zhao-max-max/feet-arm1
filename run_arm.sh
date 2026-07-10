@@ -155,6 +155,7 @@ stop_new_ros2_daemons() {
 cleanup() {
   (( CLEANUP_RUNNING )) && return
   CLEANUP_RUNNING=1
+  trap '' INT TERM  # prevent double Ctrl+C from interrupting cleanup
   echo "[run_arm] shutting down..."
   stop_process_group "$TASK_PID"    "task_node"
   stop_process_group "$DEBUG_TOOL_PID" "debug_tool_node"
@@ -299,7 +300,7 @@ if [[ -f "$SUCTION_WS/install/setup.bash" ]]; then
   source_setup "$SUCTION_WS/install/setup.bash"
 fi
 record_existing_ros2_daemons
-trap cleanup EXIT INT TERM
+trap cleanup EXIT INT TERM HUP
 cd "$SCRIPT_DIR"
 
 # ------------------------------------------------------------------ #

@@ -443,11 +443,13 @@ bool TaskPrimitives::do_grasp_move(
   }
   q_pre[0] += config_.tool_yaw_offset;
   q_grasp[0] += config_.tool_yaw_offset;
+  q_pre[4] += config_.grasp_roll_offset;
+  q_grasp[4] += config_.grasp_roll_offset;
 
   RCLCPP_INFO(
     node_->get_logger(),
-    "[grasp_move] pre-z=%.3f grasp-z=%.3f pitch=%.2f roll=%.2f",
-    pre_target.z(), ee_target.z(), pitch, tool_roll);
+    "[grasp_move] pre-z=%.3f grasp-z=%.3f pitch=%.2f roll=%.2f roll_offset=%.2f",
+    pre_target.z(), ee_target.z(), pitch, tool_roll, config_.grasp_roll_offset);
 
   if (!send_move_goal(std::vector<Eigen::VectorXd>{q_pre, q_grasp})) {
     publish_timing_event(
@@ -989,20 +991,72 @@ bool TaskPrimitives::do_grasp_from_current_view()
   std::sort(xs.begin(), xs.end());
   std::sort(ys.begin(), ys.end());
   std::sort(zs.begin(), zs.end());
-  std::sort(rolls.begin(), rolls.end());
   const auto median = samples.size() / 2;
 
   geometry_msgs::msg::Pose refined = samples[median];
   refined.position.x = xs[median];
   refined.position.y = ys[median];
   refined.position.z = zs[median];
-  const double roll = apply_roll_continuity(rolls[median]);
+
+  // Re-align joint_0 to the visual target (same as terminal do_full_grasp_aligned),
+  // then re-sample for accurate roll from a head-on view.
+  do_look_out(refined);
+  wait_joints_still(0.02, 200);
+
+  std::vector<geometry_msgs::msg::Pose> aligned_samples;
+  publish_timing_event(
+    node_, timing_event_pub_, "perception", "pick_samples_aligned_view", "begin");
+  for (int i = 0; i < kSamples; ++i) {
+    geometry_msgs::msg::Pose p;
+    if (perception_client_->call_pick_service_sync(config_.pick_object_name, &p)) {
+      aligned_samples.push_back(p);
+    } else {
+      RCLCPP_WARN(
+        node_->get_logger(), "[grasp_current_view] aligned sample %d/%d failed", i + 1, kSamples);
+    }
+  }
+  publish_timing_event(
+    node_, timing_event_pub_, "perception", "pick_samples_aligned_view", "end",
+    "success_count=" + std::to_string(aligned_samples.size()) +
+    ",sample_count=" + std::to_string(kSamples));
+
+  // Use aligned samples if available, otherwise fall back to original samples
+  if (!aligned_samples.empty()) {
+    std::vector<double> axs, ays, azs, arolls;
+    for (const auto & s : aligned_samples) {
+      axs.push_back(s.position.x);
+      ays.push_back(s.position.y);
+      azs.push_back(s.position.z);
+      // Use refined.position for base_yaw so it matches joint_0 set by do_look_out(refined).
+      // The perception sample position may differ slightly from refined, which would shift
+      // base_yaw away from actual joint_0 and produce a wrong roll.
+      geometry_msgs::msg::Pose s_roll = s;
+      s_roll.position.x = refined.position.x;
+      s_roll.position.y = refined.position.y;
+      arolls.push_back(get_box_edge_roll(s_roll));
+    }
+    std::sort(axs.begin(), axs.end());
+    std::sort(ays.begin(), ays.end());
+    std::sort(azs.begin(), azs.end());
+    std::sort(arolls.begin(), arolls.end());
+    const auto am = aligned_samples.size() / 2;
+    refined = aligned_samples[am];
+    refined.position.x = axs[am];
+    refined.position.y = ays[am];
+    refined.position.z = azs[am];
+    rolls.clear();
+    rolls = arolls;
+  }
+
+  std::sort(rolls.begin(), rolls.end());
+  const double roll = apply_roll_continuity(rolls[rolls.size() / 2]);
 
   target_pub_->publish(refined);
   RCLCPP_INFO(
     node_->get_logger(),
-    "[grasp_current_view] %zu samples from ready yaw, median pos=(%.3f,%.3f,%.3f) roll=%.3f rad (%.1f deg)",
-    samples.size(), refined.position.x, refined.position.y, refined.position.z,
+    "[grasp_current_view] %zu aligned samples, median pos=(%.3f,%.3f,%.3f) roll=%.3f rad (%.1f deg)",
+    aligned_samples.empty() ? samples.size() : aligned_samples.size(),
+    refined.position.x, refined.position.y, refined.position.z,
     roll, roll * 180.0 / M_PI);
 
   if (!do_grasp_move(refined, roll)) {

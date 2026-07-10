@@ -125,6 +125,7 @@ public:
     // Store parameters (狗背交接，task_store)
     store_hover_offset_ = this->declare_parameter("task_store.hover_offset", 0.10);
     store_roll_offset_ = this->declare_parameter("task_store.roll_offset_deg", 0.0) * M_PI / 180.0;
+    grasp_roll_offset_ = this->declare_parameter("task_step6.grasp_roll_offset_deg", 0.0) * M_PI / 180.0;
     stack_mock_z_ = this->declare_parameter("task_stack.mock_z", 0.1);
     stack_mock_yaw_ = this->declare_parameter("task_stack.mock_yaw", 0.0);
 
@@ -279,6 +280,7 @@ public:
     primitive_config.stack_roll_sign = stack_roll_sign_;
     primitive_config.store_hover_offset = store_hover_offset_;
     primitive_config.store_roll_offset = store_roll_offset_;
+    primitive_config.grasp_roll_offset = grasp_roll_offset_;
     task_primitives_ = std::make_unique<arm2_task::task::TaskPrimitives>(
         this, kin_engine_.get(), motion_client_.get(), perception_client_.get(),
         end_effector_client_.get(), target_pub_, &presets_, &q_current_, &dq_current_,
@@ -551,6 +553,7 @@ private:
   // Store parameters (狗背交接，task_store)
   double store_hover_offset_{0.10};
   double store_roll_offset_{0.0};
+  double grasp_roll_offset_{0.0};
   bool stack_use_mock_{false};
   double stack_mock_x_{0.35};
   double stack_mock_y_{0.0};
