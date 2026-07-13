@@ -42,6 +42,35 @@ TaskPrimitives::TaskPrimitives(
   timing_event_pub_ = create_timing_event_publisher(node_);
 }
 
+geometry_msgs::msg::Pose TaskPrimitives::clamp_to_min_reach(
+  const geometry_msgs::msg::Pose & pose) const
+{
+  const double min_reach = config_.dog_half_length + config_.box_half_length;
+  if (min_reach <= 0.0) {
+    return pose;
+  }
+  const double x = pose.position.x;
+  const double y = pose.position.y;
+  const double dist = std::sqrt(x * x + y * y);
+  if (dist >= min_reach) {
+    return pose;
+  }
+  geometry_msgs::msg::Pose out = pose;
+  if (dist < 1e-6) {
+    out.position.x = min_reach;
+    out.position.y = 0.0;
+  } else {
+    const double scale = min_reach / dist;
+    out.position.x = x * scale;
+    out.position.y = y * scale;
+  }
+  RCLCPP_WARN(
+    node_->get_logger(),
+    "[place] Target (%.3f, %.3f) too close (dist=%.3f < min_reach=%.3f); clamped to (%.3f, %.3f).",
+    x, y, dist, min_reach, out.position.x, out.position.y);
+  return out;
+}
+
 bool TaskPrimitives::task_is_running() const
 {
   return is_running_ == nullptr || is_running_->load();
@@ -364,6 +393,83 @@ bool TaskPrimitives::do_look_out(const geometry_msgs::msg::Pose & target)
   return ok;
 }
 
+bool TaskPrimitives::do_pre_place_pivot(const geometry_msgs::msg::Pose & target)
+{
+  std::ostringstream detail;
+  detail << "target_x=" << target.position.x << ",target_y=" << target.position.y;
+  publish_timing_event(node_, timing_event_pub_, "action", "pre_place_pivot", "begin", detail.str());
+
+  if (!presets_->count("pre_place")) {
+    RCLCPP_WARN(node_->get_logger(), "[pre_place_pivot] Preset 'pre_place' not found, skipping.");
+    publish_timing_event(
+      node_, timing_event_pub_, "action", "pre_place_pivot", "end",
+      detail.str() + ",ok=0,reason=missing_preset");
+    return false;
+  }
+
+  // 降速保证平滑，完成后恢复默认速度
+  motion_client_->set_trajectory_defaults(
+    config_.pre_place_velocity, config_.default_acceleration, config_.default_blend_radius);
+
+  const auto pre_place_q = presets_->at("pre_place");
+  if (!send_move_goal(std::vector<Eigen::VectorXd>{pre_place_q}) || !wait_for_action_completion()) {
+    RCLCPP_WARN(node_->get_logger(), "[pre_place_pivot] Move to pre_place failed, continuing anyway.");
+    motion_client_->set_trajectory_defaults(
+      config_.default_velocity, config_.default_acceleration, config_.default_blend_radius);
+    publish_timing_event(
+      node_, timing_event_pub_, "action", "pre_place_pivot", "end",
+      detail.str() + ",ok=0,reason=pre_place_move_failed");
+    return false;
+  }
+
+  const double target_yaw = std::atan2(target.position.y, target.position.x);
+
+  // place_ready 是途径点，和 pivot 合并成一个 move_goal，由 blending 平滑过渡
+  if (presets_->count("place_ready")) {
+    auto place_ready_q = presets_->at("place_ready");
+    auto pivot_q = place_ready_q;
+    pivot_q[0] = target_yaw;
+    detail << ",yaw=" << target_yaw;
+    RCLCPP_INFO(
+      node_->get_logger(),
+      "[pre_place_pivot] place_ready + pivot joint0=%.3f rad toward (%.3f, %.3f)",
+      target_yaw, target.position.x, target.position.y);
+    if (!send_move_goal(std::vector<Eigen::VectorXd>{place_ready_q, pivot_q}) || !wait_for_action_completion()) {
+      RCLCPP_WARN(node_->get_logger(), "[pre_place_pivot] place_ready+pivot failed, continuing anyway.");
+      motion_client_->set_trajectory_defaults(
+        config_.default_velocity, config_.default_acceleration, config_.default_blend_radius);
+      publish_timing_event(
+        node_, timing_event_pub_, "action", "pre_place_pivot", "end",
+        detail.str() + ",ok=0,reason=pivot_move_failed");
+      return false;
+    }
+  } else {
+    auto pivot_q = pre_place_q;
+    pivot_q[0] = target_yaw;
+    detail << ",yaw=" << target_yaw;
+    RCLCPP_INFO(
+      node_->get_logger(),
+      "[pre_place_pivot] pivot joint0=%.3f rad toward (%.3f, %.3f)",
+      target_yaw, target.position.x, target.position.y);
+    if (!send_move_goal(std::vector<Eigen::VectorXd>{pivot_q}) || !wait_for_action_completion()) {
+      RCLCPP_WARN(node_->get_logger(), "[pre_place_pivot] Pivot failed, continuing anyway.");
+      motion_client_->set_trajectory_defaults(
+        config_.default_velocity, config_.default_acceleration, config_.default_blend_radius);
+      publish_timing_event(
+        node_, timing_event_pub_, "action", "pre_place_pivot", "end",
+        detail.str() + ",ok=0,reason=pivot_move_failed");
+      return false;
+    }
+  }
+
+  motion_client_->set_trajectory_defaults(
+    config_.default_velocity, config_.default_acceleration, config_.default_blend_radius);
+  publish_timing_event(
+    node_, timing_event_pub_, "action", "pre_place_pivot", "end",
+    detail.str() + ",ok=1");
+  return true;
+}
+
 void TaskPrimitives::do_suction_on()
 {
   publish_timing_event(node_, timing_event_pub_, "action", "suction_on", "begin");
@@ -565,18 +671,21 @@ bool TaskPrimitives::do_place_move(const geometry_msgs::msg::Pose & target)
 bool TaskPrimitives::do_place_move_with_orientation(
   const geometry_msgs::msg::Pose & frame_world)
 {
+  const geometry_msgs::msg::Pose frame = clamp_to_min_reach(frame_world);
   std::ostringstream detail;
-  detail << "frame_x=" << frame_world.position.x
-         << ",frame_y=" << frame_world.position.y
-         << ",frame_z=" << frame_world.position.z;
+  detail << "frame_x=" << frame.position.x
+         << ",frame_y=" << frame.position.y
+         << ",frame_z=" << frame.position.z;
   publish_timing_event(node_, timing_event_pub_, "action", "place_frame", "begin", detail.str());
 
-  const double tool_roll = get_frame_yaw(frame_world);
+  do_pre_place_pivot(frame);
+
+  const double tool_roll = get_frame_yaw(frame);
   const double pitch = config_.grasp_pitch + config_.tool_pitch_offset;
   const Eigen::Vector3d ee_target(
-    frame_world.position.x,
-    frame_world.position.y,
-    frame_world.position.z + config_.place_frame_contact_offset);
+    frame.position.x,
+    frame.position.y,
+    frame.position.z + config_.place_frame_contact_offset);
   const Eigen::Vector3d pre_target(
     ee_target.x(), ee_target.y(), ee_target.z() + config_.place_frame_hover_height);
 
@@ -654,19 +763,22 @@ bool TaskPrimitives::do_place_move_with_orientation(
 bool TaskPrimitives::do_place_move_with_direct_height(
   const geometry_msgs::msg::Pose & target)
 {
+  const geometry_msgs::msg::Pose tgt = clamp_to_min_reach(target);
   std::ostringstream detail;
-  detail << "target_x=" << target.position.x
-         << ",target_y=" << target.position.y
-         << ",target_z=" << target.position.z;
+  detail << "target_x=" << tgt.position.x
+         << ",target_y=" << tgt.position.y
+         << ",target_z=" << tgt.position.z;
   publish_timing_event(
     node_, timing_event_pub_, "action", "place_direct_height", "begin", detail.str());
 
-  const double tool_roll = get_frame_yaw(target);
+  do_pre_place_pivot(tgt);
+
+  const double tool_roll = get_frame_yaw(tgt);
   const double pitch = config_.grasp_pitch + config_.tool_pitch_offset;
   const Eigen::Vector3d ee_target(
-    target.position.x,
-    target.position.y,
-    target.position.z);
+    tgt.position.x,
+    tgt.position.y,
+    tgt.position.z);
   const Eigen::Vector3d pre_target(
     ee_target.x(), ee_target.y(), ee_target.z() + config_.place_frame_hover_height);
 
@@ -772,18 +884,21 @@ bool TaskPrimitives::do_place_move_with_direct_height(
 bool TaskPrimitives::do_stack_move_with_orientation(
   const geometry_msgs::msg::Pose & box_top_world)
 {
+  const geometry_msgs::msg::Pose box_top = clamp_to_min_reach(box_top_world);
   std::ostringstream detail;
-  detail << "box_top_x=" << box_top_world.position.x
-         << ",box_top_y=" << box_top_world.position.y
-         << ",box_top_z=" << box_top_world.position.z;
+  detail << "box_top_x=" << box_top.position.x
+         << ",box_top_y=" << box_top.position.y
+         << ",box_top_z=" << box_top.position.z;
   publish_timing_event(node_, timing_event_pub_, "action", "stack_move", "begin", detail.str());
 
-  const double tool_roll = compute_stack_tool_roll(box_top_world, config_.stack_roll_sign);
+  do_pre_place_pivot(box_top);
+
+  const double tool_roll = compute_stack_tool_roll(box_top, config_.stack_roll_sign);
   const double pitch = config_.grasp_pitch + config_.tool_pitch_offset;
   const Eigen::Vector3d ee_target(
-    box_top_world.position.x,
-    box_top_world.position.y,
-    box_top_world.position.z + config_.stack_contact_offset);
+    box_top.position.x,
+    box_top.position.y,
+    box_top.position.z + config_.stack_contact_offset);
   const Eigen::Vector3d pre_target(
     ee_target.x(), ee_target.y(), ee_target.z() + config_.stack_hover_height);
 

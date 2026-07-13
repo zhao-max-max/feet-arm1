@@ -27,6 +27,8 @@ public:
     double place_height{0.28};
     bool radar_pick_fallback_enabled{true};
     double radar_pick_fallback_target_z{0.12};
+    double stack_fallback_target_z{0.25};
+    int stack_on_place_index{1};  // 第几次 place 用 stack（0-based），默认第2次
   };
 
   NavTaskInterface(
@@ -88,6 +90,7 @@ private:
 
   arm2_task::TaskState state_{arm2_task::TaskState::IDLE};
   std::atomic<bool> remote_busy_{false};
+  int completed_place_count_{0};  // 记录已完成的 place 次数，第2次(count==1)走 stack
   rclcpp::Service<navigation::srv::MissionCommand>::SharedPtr arm_mission_server_;
   rclcpp::Service<navigation::srv::MissionCommand>::SharedPtr debug_state_server_;
   rclcpp::Client<navigation::srv::StringCommand>::SharedPtr nav_event_client_;

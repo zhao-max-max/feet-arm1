@@ -128,6 +128,8 @@ public:
     grasp_roll_offset_ = this->declare_parameter("task_step6.grasp_roll_offset_deg", 0.0) * M_PI / 180.0;
     stack_mock_z_ = this->declare_parameter("task_stack.mock_z", 0.1);
     stack_mock_yaw_ = this->declare_parameter("task_stack.mock_yaw", 0.0);
+    dog_half_length_ = this->declare_parameter("task_place.dog_half_length", 0.0);
+    box_half_length_ = this->declare_parameter("task_place.box_half_length", 0.0);
 
     const auto nav_state_topic =
         this->declare_parameter("task_nav.state_topic", std::string("/navigation/state"));
@@ -138,6 +140,8 @@ public:
         this->declare_parameter("task_nav.radar_pick_fallback.enabled", true);
     nav_radar_pick_fallback_target_z_ =
         this->declare_parameter("task_nav.radar_pick_fallback.target_z", 0.12);
+    nav_stack_fallback_target_z_ =
+        this->declare_parameter("task_nav.stack_fallback_target_z", 0.25);
     const auto nav_lidar_tf_enabled =
         this->declare_parameter("task_nav.lidar_extrinsics.enabled", true);
     const auto nav_lidar_tf_prefer_tf =
@@ -281,6 +285,12 @@ public:
     primitive_config.store_hover_offset = store_hover_offset_;
     primitive_config.store_roll_offset = store_roll_offset_;
     primitive_config.grasp_roll_offset = grasp_roll_offset_;
+    primitive_config.dog_half_length = dog_half_length_;
+    primitive_config.box_half_length = box_half_length_;
+    primitive_config.pre_place_velocity = this->declare_parameter("task_place.pre_place_velocity", 0.3);
+    primitive_config.default_velocity = max_v_;
+    primitive_config.default_acceleration = max_a_;
+    primitive_config.default_blend_radius = dist_threshold_;
     task_primitives_ = std::make_unique<arm2_task::task::TaskPrimitives>(
         this, kin_engine_.get(), motion_client_.get(), perception_client_.get(),
         end_effector_client_.get(), target_pub_, &presets_, &q_current_, &dq_current_,
@@ -357,6 +367,9 @@ public:
     nav_interface_config.place_height = nav_place_height_;
     nav_interface_config.radar_pick_fallback_enabled = nav_radar_pick_fallback_enabled_;
     nav_interface_config.radar_pick_fallback_target_z = nav_radar_pick_fallback_target_z_;
+    nav_interface_config.stack_fallback_target_z = nav_stack_fallback_target_z_;
+    nav_interface_config.stack_on_place_index =
+        this->declare_parameter("task_nav.stack_on_place_index", 1);
     nav_interface_ = std::make_unique<arm2_task::task::NavTaskInterface>(
         this, task_sequences_.get(), task_primitives_.get(), nav_pose_tracker_.get(),
         &is_running_, nav_interface_config);
@@ -439,7 +452,7 @@ private:
 
   void load_presets()
   {
-    const std::vector<std::string> preset_names = {"reset", "look_out", "load", "carry", "store", "store_retreat"};
+    const std::vector<std::string> preset_names = {"reset", "look_out", "load", "carry", "store", "store_retreat", "pre_place", "place_ready"};
     for (const auto &name : preset_names)
     {
       const auto angles_deg =
@@ -554,6 +567,8 @@ private:
   double store_hover_offset_{0.10};
   double store_roll_offset_{0.0};
   double grasp_roll_offset_{0.0};
+  double dog_half_length_{0.0};
+  double box_half_length_{0.0};
   bool stack_use_mock_{false};
   double stack_mock_x_{0.35};
   double stack_mock_y_{0.0};
@@ -563,6 +578,7 @@ private:
   double nav_place_height_{0.28};
   bool nav_radar_pick_fallback_enabled_{true};
   double nav_radar_pick_fallback_target_z_{0.12};
+  double nav_stack_fallback_target_z_{0.25};
 
   // Presets
   std::map<std::string, Eigen::VectorXd> presets_;

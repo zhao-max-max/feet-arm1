@@ -48,6 +48,12 @@ public:
     double store_hover_offset{0.10};  // 狗背交接时悬停高度偏移 (m)
     double store_roll_offset{0.0};    // 放到狗吸盘时 joint_4 附加转角 (rad)
     double grasp_roll_offset{0.0};    // 抓取时 joint_4 roll 附加偏置 (rad)
+    double dog_half_length{0.0};      // 狗体半长 (m)，从臂基座到狗前/后端的距离
+    double box_half_length{0.0};      // 箱子半长 (m)，放置时箱子中心到边缘的距离
+    double pre_place_velocity{0.3};   // pre_place_pivot 阶段的关节速度 (rad/s)，低速保证平滑
+    double default_velocity{1.0};     // 恢复用的默认速度，由 task_node 填入
+    double default_acceleration{2.0}; // 恢复用的默认加速度
+    double default_blend_radius{0.1}; // 恢复用的默认 blend radius
   };
 
   TaskPrimitives(
@@ -77,6 +83,8 @@ public:
   void do_dog_suction_on();
   void do_dog_suction_off();
   bool do_look_out(const geometry_msgs::msg::Pose & target);
+  // place 前准备：先到 pre_place 预设，再只转 joint0 对准目标方向
+  bool do_pre_place_pivot(const geometry_msgs::msg::Pose & target);
   void do_suction_on();
   void do_suction_off();
 
@@ -102,6 +110,8 @@ private:
   double apply_roll_continuity(double roll);
   Eigen::VectorXd current_q_snapshot() const;
   Eigen::VectorXd current_dq_snapshot() const;
+  // 把 pose 的 XY 往外推，使其距基座水平距离不小于 dog_half_length + box_half_length
+  geometry_msgs::msg::Pose clamp_to_min_reach(const geometry_msgs::msg::Pose & pose) const;
 
   rclcpp::Node * node_{nullptr};
   arm2_task::KinematicsEngine * kin_engine_{nullptr};

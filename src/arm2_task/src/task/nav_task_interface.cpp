@@ -759,56 +759,119 @@ bool NavTaskInterface::do_place_sequence(const MissionCommand & command){
          << ",place_height=" << config_.place_height;
   publish_timing_event(node_, timing_event_pub_, "mission", "place_sequence", "begin", detail.str());
 
-  // 先尝试狗头相机感知放置（含 roll 对齐）
-  bool place_ok = sequences_->place_from_perception();
+  bool place_ok = false;
 
-  if (!place_ok) {
-    // 感知失败，降级到雷达坐标兜底
-    RCLCPP_WARN(
-      node_->get_logger(),
-      "[nav] Visual place failed for task_index=%u; falling back to radar pose.",
-      command.task_index);
-
-    arm2_task::task::RelativePlanarPose relative_pose;
-    if (!compute_command_relative_pose(command, &relative_pose)) {
-      RCLCPP_ERROR(
-        node_->get_logger(),
-        "[nav] Place fallback failed: unable to compute arm-relative pose for task_index=%u.",
-        command.task_index);
-      publish_timing_event(
-        node_, timing_event_pub_, "mission", "place_sequence", "end",
-        detail.str() + ",ok=0,reason=relative_pose_failed");
-      return false;
-    }
-
-    geometry_msgs::msg::Pose fallback_pose;
-    fallback_pose.position.x = relative_pose.x;
-    fallback_pose.position.y = relative_pose.y;
-    fallback_pose.position.z = config_.place_height;
-    fallback_pose.orientation.x = 0.0;
-    fallback_pose.orientation.y = 0.0;
-    fallback_pose.orientation.z = std::sin(relative_pose.yaw / 2.0);
-    fallback_pose.orientation.w = std::cos(relative_pose.yaw / 2.0);
-
+  if (completed_place_count_ == config_.stack_on_place_index) {
+    // 第2次放置：叠放在上一个箱子上
     RCLCPP_INFO(
       node_->get_logger(),
-      "[nav] Place fallback target_id=%d arm=(x=%.3f, y=%.3f, z=%.3f, yaw=%.3f rad).",
-      relative_pose.task_pose.id,
-      fallback_pose.position.x,
-      fallback_pose.position.y,
-      fallback_pose.position.z,
-      relative_pose.yaw);
+      "[nav] Place #%d: using stack (place on top of previous box).",
+      completed_place_count_ + 1);
+    place_ok = sequences_->stack_mock_or_perception();
 
-    place_ok = sequences_->place_pose_direct_height(fallback_pose);
     if (!place_ok) {
-      publish_timing_event(
-        node_, timing_event_pub_, "mission", "place_sequence", "end",
-        detail.str() + ",ok=0,reason=place_fallback_failed,target_id=" +
-        std::to_string(relative_pose.task_pose.id));
-      return false;
+      // stack 感知失败，降级到雷达坐标兜底（与普通 place 一致）
+      RCLCPP_WARN(
+        node_->get_logger(),
+        "[nav] Stack perception failed for task_index=%u; falling back to radar pose.",
+        command.task_index);
+
+      arm2_task::task::RelativePlanarPose relative_pose;
+      if (!compute_command_relative_pose(command, &relative_pose)) {
+        RCLCPP_ERROR(
+          node_->get_logger(),
+          "[nav] Stack fallback failed: unable to compute arm-relative pose for task_index=%u.",
+          command.task_index);
+        publish_timing_event(
+          node_, timing_event_pub_, "mission", "place_sequence", "end",
+          detail.str() + ",ok=0,reason=stack_fallback_relative_pose_failed");
+        return false;
+      }
+
+      geometry_msgs::msg::Pose fallback_pose;
+      fallback_pose.position.x = relative_pose.x;
+      fallback_pose.position.y = relative_pose.y;
+      fallback_pose.position.z = config_.stack_fallback_target_z;
+      fallback_pose.orientation.x = 0.0;
+      fallback_pose.orientation.y = 0.0;
+      fallback_pose.orientation.z = std::sin(relative_pose.yaw / 2.0);
+      fallback_pose.orientation.w = std::cos(relative_pose.yaw / 2.0);
+
+      RCLCPP_INFO(
+        node_->get_logger(),
+        "[nav] Stack fallback target_id=%d arm=(x=%.3f, y=%.3f, z=%.3f, yaw=%.3f rad).",
+        relative_pose.task_pose.id,
+        fallback_pose.position.x,
+        fallback_pose.position.y,
+        fallback_pose.position.z,
+        relative_pose.yaw);
+
+      place_ok = sequences_->stack_pose(fallback_pose);
+      if (!place_ok) {
+        publish_timing_event(
+          node_, timing_event_pub_, "mission", "place_sequence", "end",
+          detail.str() + ",ok=0,reason=stack_fallback_failed,target_id=" +
+          std::to_string(relative_pose.task_pose.id));
+        return false;
+      }
+    }
+  } else {
+    // 第1次及第3次以后：先尝试狗头相机感知放置（含 roll 对齐）
+    RCLCPP_INFO(
+      node_->get_logger(),
+      "[nav] Place #%d: normal place.",
+      completed_place_count_ + 1);
+    place_ok = sequences_->place_from_perception();
+
+    if (!place_ok) {
+      // 感知失败，降级到雷达坐标兜底
+      RCLCPP_WARN(
+        node_->get_logger(),
+        "[nav] Visual place failed for task_index=%u; falling back to radar pose.",
+        command.task_index);
+
+      arm2_task::task::RelativePlanarPose relative_pose;
+      if (!compute_command_relative_pose(command, &relative_pose)) {
+        RCLCPP_ERROR(
+          node_->get_logger(),
+          "[nav] Place fallback failed: unable to compute arm-relative pose for task_index=%u.",
+          command.task_index);
+        publish_timing_event(
+          node_, timing_event_pub_, "mission", "place_sequence", "end",
+          detail.str() + ",ok=0,reason=relative_pose_failed");
+        return false;
+      }
+
+      geometry_msgs::msg::Pose fallback_pose;
+      fallback_pose.position.x = relative_pose.x;
+      fallback_pose.position.y = relative_pose.y;
+      fallback_pose.position.z = config_.place_height;
+      fallback_pose.orientation.x = 0.0;
+      fallback_pose.orientation.y = 0.0;
+      fallback_pose.orientation.z = std::sin(relative_pose.yaw / 2.0);
+      fallback_pose.orientation.w = std::cos(relative_pose.yaw / 2.0);
+
+      RCLCPP_INFO(
+        node_->get_logger(),
+        "[nav] Place fallback target_id=%d arm=(x=%.3f, y=%.3f, z=%.3f, yaw=%.3f rad).",
+        relative_pose.task_pose.id,
+        fallback_pose.position.x,
+        fallback_pose.position.y,
+        fallback_pose.position.z,
+        relative_pose.yaw);
+
+      place_ok = sequences_->place_pose_direct_height(fallback_pose);
+      if (!place_ok) {
+        publish_timing_event(
+          node_, timing_event_pub_, "mission", "place_sequence", "end",
+          detail.str() + ",ok=0,reason=place_fallback_failed,target_id=" +
+          std::to_string(relative_pose.task_pose.id));
+        return false;
+      }
     }
   }
 
+  ++completed_place_count_;
   primitives_->do_reset();
   rclcpp::sleep_for(500ms);
   send_nav_event("placed");
@@ -951,6 +1014,7 @@ bool NavTaskInterface::execute_mission_command(const MissionCommand & command)
       return false;
     }
 
+    completed_place_count_ = 0;
     RCLCPP_INFO(node_->get_logger(), "[nav] Caching ready target without arm motion...");
     const bool ok = do_ready_sequence(command);
     publish_timing_event(
