@@ -13,7 +13,13 @@
       "Bash(python3 *)",
       "Bash(xargs cat)",
       "Read(//mnt/data/robotics/end/camera/arm_camera/**)",
-      "Read(//mnt/data/robotics/camera/**)"
+      "Read(//mnt/data/robotics/camera/**)",
+      "Bash(ip link:*)",
+      "Read(//dev/**)",
+      "Read(//sys/bus/usb/devices/**)",
+      "Bash(lsusb)",
+      "Bash(dmesg)",
+      "Bash(sudo modprobe:*)"
     ]
   }
 }

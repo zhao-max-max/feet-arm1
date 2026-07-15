@@ -385,7 +385,8 @@ fi
 #  任务层：task_node（可选 xterm）
 # ------------------------------------------------------------------ #
 
-TASK_LOG="/tmp/task_node_debug.log"
+TASK_LOG="$SCRIPT_DIR/logs/task_node_$(date +%Y%m%d_%H%M%S)_${TASK_MODE}.log"
+mkdir -p "$SCRIPT_DIR/logs"
 TASK_TITLE="Arm Task Control Panel [$TASK_MODE]"
 echo "[run_arm] launching task_node ($TASK_MODE)... (log: $TASK_LOG)"
 # 终端调试模式必须直启节点。ros2 launch 不会把 stdin 稳定转发给 task_node，

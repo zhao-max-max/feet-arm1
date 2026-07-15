@@ -233,4 +233,7 @@ echo "  slider_ui    pid: $UI_PID"
 echo "  logs         dir: $LOG_DIR"
 echo ""
 
-wait -n "$DRIVER_PID" "$CONTROL_PID" "$UI_PID"
+# 等待任意一个子进程退出（或 Ctrl+C 触发 trap）
+while kill -0 "$DRIVER_PID" "$CONTROL_PID" "$UI_PID" 2>/dev/null; do
+  sleep 0.5
+done

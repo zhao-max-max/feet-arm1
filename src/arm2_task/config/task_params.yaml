@@ -16,8 +16,8 @@
 
     # task_node 发送 move_joint goal 时写入的默认速度、加速度和 blend 半径。
     trajectory_planner:
-      max_velocity: 0.8
-      max_acceleration: 2.0
+      max_velocity: 2.7
+      max_acceleration: 2.4
       dist_threshold: 0.10
 
     # # 预设动作点，单位为角度。
@@ -34,7 +34,7 @@
     # 预设动作点，单位为角度。
     presets:
       load: [0.0, 90.0, -80.0, -90.0, 0.0]
-      look_out: [0.0, 90.0, -145.0, 0.0, 0.0]
+      look_out: [0.0, 90.0, -120.0, 0.0, 0.0]
       reset: [0.0, 95.0, -170.0, 10.0, 0.0]
       carry: [140.0, 175.0, -140.0, 10.0, 0.0]
       # place 前的中间安全姿态：先收回到这里，再旋转 joint0 到放置方向，再执行 place
@@ -83,9 +83,9 @@
       retreat_offset: 0.15
       # 防碰狗体安全距离：末端 XY 离基座距离不足时自动外推。
       # min_reach = dog_half_length + box_half_length，设为 0 则不启用。
-      dog_half_length: 0.25   # 狗体半长 (m)，从臂基座到狗前/后端
-      box_half_length: 0.125   # 箱子半长 (m)，箱子中心到边缘
-      pre_place_velocity: 0.5  # pre_place_pivot 阶段关节速度 (rad/s)，低速保证平滑
+      dog_half_length: 0.0   # 狗体半长 (m)，从臂基座到狗前/后端
+      box_half_length: 0.0   # 箱子半长 (m)，箱子中心到边缘
+      pre_place_velocity: 0.8  # pre_place_pivot 阶段关节速度 (rad/s)，低速保证平滑
 
     # nav place 使用 hover_height 作为放置前悬停高度；contact_offset 仅 frame place 路径使用。
     task_place_frame:
@@ -119,7 +119,7 @@
       task_points_topic: /navigation/task_points
       place_height: 0.0
       # 第几次 place 用 stack 叠放（0-based，默认 1 = 第2次 place）
-      stack_on_place_index: 0
+      stack_on_place_index: 1
       # 视觉 get_pick_pos 异常时，用当前 nav 任务点 x/y 生成 pickup 兜底目标。
       # target_z 会继续叠加 task_step6.object_height / tool_offset_z / tool_tip_length。
       radar_pick_fallback:
