@@ -762,59 +762,37 @@ bool NavTaskInterface::do_place_sequence(const MissionCommand & command){
   bool place_ok = false;
 
   if (completed_place_count_ == config_.stack_on_place_index) {
-    // 第2次放置：叠放在上一个箱子上
+    // 第stack_on_place_index次放置：只转joint0对准目标方向后直接松吸盘，不做IK下降
     RCLCPP_INFO(
       node_->get_logger(),
-      "[nav] Place #%d: using stack (place on top of previous box).",
+      "[nav] Place #%d: pivot-and-release (no IK descent).",
       completed_place_count_ + 1);
-    place_ok = sequences_->stack_mock_or_perception();
 
-    if (!place_ok) {
-      // stack 感知失败，降级到雷达坐标兜底（与普通 place 一致）
-      RCLCPP_WARN(
-        node_->get_logger(),
-        "[nav] Stack perception failed for task_index=%u; falling back to radar pose.",
-        command.task_index);
-
-      arm2_task::task::RelativePlanarPose relative_pose;
-      if (!compute_command_relative_pose(command, &relative_pose)) {
-        RCLCPP_ERROR(
-          node_->get_logger(),
-          "[nav] Stack fallback failed: unable to compute arm-relative pose for task_index=%u.",
-          command.task_index);
-        publish_timing_event(
-          node_, timing_event_pub_, "mission", "place_sequence", "end",
-          detail.str() + ",ok=0,reason=stack_fallback_relative_pose_failed");
-        return false;
-      }
-
-      geometry_msgs::msg::Pose fallback_pose;
-      fallback_pose.position.x = relative_pose.x;
-      fallback_pose.position.y = relative_pose.y;
-      fallback_pose.position.z = config_.stack_fallback_target_z;
-      fallback_pose.orientation.x = 0.0;
-      fallback_pose.orientation.y = 0.0;
-      fallback_pose.orientation.z = std::sin(relative_pose.yaw / 2.0);
-      fallback_pose.orientation.w = std::cos(relative_pose.yaw / 2.0);
-
+    geometry_msgs::msg::Pose pivot_target;
+    arm2_task::task::RelativePlanarPose relative_pose;
+    if (compute_command_relative_pose(command, &relative_pose)) {
+      pivot_target.position.x = relative_pose.x;
+      pivot_target.position.y = relative_pose.y;
+      pivot_target.position.z = config_.stack_fallback_target_z;
+      pivot_target.orientation.w = 1.0;
       RCLCPP_INFO(
         node_->get_logger(),
-        "[nav] Stack fallback target_id=%d arm=(x=%.3f, y=%.3f, z=%.3f, yaw=%.3f rad).",
-        relative_pose.task_pose.id,
-        fallback_pose.position.x,
-        fallback_pose.position.y,
-        fallback_pose.position.z,
-        relative_pose.yaw);
-
-      place_ok = sequences_->stack_pose(fallback_pose);
-      if (!place_ok) {
-        publish_timing_event(
-          node_, timing_event_pub_, "mission", "place_sequence", "end",
-          detail.str() + ",ok=0,reason=stack_fallback_failed,target_id=" +
-          std::to_string(relative_pose.task_pose.id));
-        return false;
-      }
+        "[nav] pivot-release target_id=%d arm=(x=%.3f, y=%.3f).",
+        relative_pose.task_pose.id, relative_pose.x, relative_pose.y);
+    } else {
+      RCLCPP_WARN(
+        node_->get_logger(),
+        "[nav] pivot-release: no pose available for task_index=%u, using forward direction.",
+        command.task_index);
+      pivot_target.position.x = 0.35;
+      pivot_target.position.y = 0.0;
+      pivot_target.position.z = 0.0;
+      pivot_target.orientation.w = 1.0;
     }
+
+    primitives_->do_pre_place_pivot(pivot_target);
+    primitives_->do_suction_off();
+    place_ok = true;
   } else {
     // 第1次及第3次以后：先尝试狗头相机感知放置（含 roll 对齐）
     RCLCPP_INFO(
