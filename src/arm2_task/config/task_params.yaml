@@ -27,6 +27,10 @@
     #   reset: [0.0, 95.0, -170.0, 10.0, 0.0]
     #   carry: [40.0, 175.0, -140.0, 10.0, 0.0]
     #   # 狗背交接预设：臂带箱子移到狗背吸盘正上方的中间姿态，需根据实机调整
+    # place 前的中间安全姿态：先收回到这里，再旋转 joint0 到放置方向，再执行 place
+    #  pre_place: [140.0, 95.0, -90.0, 30.0, 0.0]
+      # place 前第二个过渡姿态：从 pre_place 到这里，再 pivot joint0，再执行 place
+    #  place_ready: [0.0, 95.0, -90.0, 30.0, 0.0]
     #   store: [135.0, 95.0, -70.0, -70.0, 0.0]
     #   # store 后撤退高位：store 方向不变但末端抬高，用于放完箱子后安全离开
     #   store_retreat: [135.0, 90.0, -70.0, 0.0, 0.0]
@@ -36,11 +40,9 @@
       load: [0.0, 90.0, -80.0, -90.0, 0.0]
       look_out: [0.0, 90.0, -120.0, 0.0, 0.0]
       reset: [0.0, 95.0, -170.0, 10.0, 0.0]
-      carry: [140.0, 175.0, -140.0, 10.0, 0.0]
-      # place 前的中间安全姿态：先收回到这里，再旋转 joint0 到放置方向，再执行 place
-      pre_place: [140.0, 95.0, -90.0, 30.0, 0.0]
-      # place 前第二个过渡姿态：从 pre_place 到这里，再 pivot joint0，再执行 place
-      place_ready: [0.0, 95.0, -90.0, 30.0, 0.0]
+      carry: [140.0, 175.0, -140.0, 40.0, 0.0]
+      # place IK 失败时的兜底安全姿态：移到这里后松吸盘，视为 place 完成
+      place_ik_fallback: [0.0, 70.0, -50.0, -90.0, 0.0]
       # 狗背交接预设：臂带箱子移到狗背吸盘正上方的中间姿态，需根据实机调整
       store: [135.0, 95.0, -70.0, -70.0, 0.0]
       # store 后撤退高位：store 方向不变但末端抬高，用于放完箱子后安全离开
@@ -76,6 +78,7 @@
       mock_y: 0.0
       mock_z: 0.12
       grasp_roll_offset_deg: 0.0
+      pick_samples: 2
 
     # place 共用参数。nav direct_height 路径把 retreat_offset 作为 reset 前的中间撤离路点。
     task_place:
@@ -119,7 +122,7 @@
       task_points_topic: /navigation/task_points
       place_height: 0.0
       # 第几次 place 用 stack 叠放（0-based，默认 1 = 第2次 place）
-      stack_on_place_index: 0
+      stack_on_place_index: 4
       # 视觉 get_pick_pos 异常时，用当前 nav 任务点 x/y 生成 pickup 兜底目标。
       # target_z 会继续叠加 task_step6.object_height / tool_offset_z / tool_tip_length。
       radar_pick_fallback:

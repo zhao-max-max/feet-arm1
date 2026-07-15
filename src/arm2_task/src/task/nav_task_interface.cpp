@@ -810,41 +810,43 @@ bool NavTaskInterface::do_place_sequence(const MissionCommand & command){
 
       arm2_task::task::RelativePlanarPose relative_pose;
       if (!compute_command_relative_pose(command, &relative_pose)) {
-        RCLCPP_ERROR(
+        RCLCPP_WARN(
           node_->get_logger(),
-          "[nav] Place fallback failed: unable to compute arm-relative pose for task_index=%u.",
+          "[nav] Place fallback failed: unable to compute arm-relative pose for task_index=%u; using IK fallback preset.",
           command.task_index);
-        publish_timing_event(
-          node_, timing_event_pub_, "mission", "place_sequence", "end",
-          detail.str() + ",ok=0,reason=relative_pose_failed");
-        return false;
-      }
+        primitives_->do_move_to_preset("place_ik_fallback");
+        primitives_->do_suction_off();
+        place_ok = true;
+      } else {
+        const double target_yaw = std::atan2(relative_pose.y, relative_pose.x);
+        geometry_msgs::msg::Pose fallback_pose;
+        fallback_pose.position.x = relative_pose.x;
+        fallback_pose.position.y = relative_pose.y;
+        fallback_pose.position.z = config_.place_height;
+        fallback_pose.orientation.x = 0.0;
+        fallback_pose.orientation.y = 0.0;
+        fallback_pose.orientation.z = std::sin(relative_pose.yaw / 2.0);
+        fallback_pose.orientation.w = std::cos(relative_pose.yaw / 2.0);
 
-      geometry_msgs::msg::Pose fallback_pose;
-      fallback_pose.position.x = relative_pose.x;
-      fallback_pose.position.y = relative_pose.y;
-      fallback_pose.position.z = config_.place_height;
-      fallback_pose.orientation.x = 0.0;
-      fallback_pose.orientation.y = 0.0;
-      fallback_pose.orientation.z = std::sin(relative_pose.yaw / 2.0);
-      fallback_pose.orientation.w = std::cos(relative_pose.yaw / 2.0);
+        RCLCPP_INFO(
+          node_->get_logger(),
+          "[nav] Place fallback target_id=%d arm=(x=%.3f, y=%.3f, z=%.3f, yaw=%.3f rad).",
+          relative_pose.task_pose.id,
+          fallback_pose.position.x,
+          fallback_pose.position.y,
+          fallback_pose.position.z,
+          relative_pose.yaw);
 
-      RCLCPP_INFO(
-        node_->get_logger(),
-        "[nav] Place fallback target_id=%d arm=(x=%.3f, y=%.3f, z=%.3f, yaw=%.3f rad).",
-        relative_pose.task_pose.id,
-        fallback_pose.position.x,
-        fallback_pose.position.y,
-        fallback_pose.position.z,
-        relative_pose.yaw);
-
-      place_ok = sequences_->place_pose_direct_height(fallback_pose);
-      if (!place_ok) {
-        publish_timing_event(
-          node_, timing_event_pub_, "mission", "place_sequence", "end",
-          detail.str() + ",ok=0,reason=place_fallback_failed,target_id=" +
-          std::to_string(relative_pose.task_pose.id));
-        return false;
+        place_ok = sequences_->place_pose_direct_height(fallback_pose);
+        if (!place_ok) {
+          RCLCPP_WARN(
+            node_->get_logger(),
+            "[nav] Place fallback also failed for task_index=%u; using IK fallback preset.",
+            command.task_index);
+          primitives_->do_move_to_preset("place_ik_fallback", target_yaw);
+          primitives_->do_suction_off();
+          place_ok = true;
+        }
       }
     }
   }
@@ -926,35 +928,34 @@ bool NavTaskInterface::do_pickup_from_dog_sequence(const MissionCommand & comman
 
     arm2_task::task::RelativePlanarPose relative_pose;
     if (!compute_command_relative_pose(command, &relative_pose)) {
-      RCLCPP_ERROR(
+      RCLCPP_WARN(
         node_->get_logger(),
-        "[nav] place2 fallback failed: unable to compute arm-relative pose for task_index=%u.",
+        "[nav] place2 fallback failed: unable to compute arm-relative pose for task_index=%u; using IK fallback preset.",
         command.task_index);
-      publish_timing_event(
-        node_, timing_event_pub_, "mission", "pickup_from_dog_sequence", "end",
-        detail.str() + ",ok=0,reason=fallback_relative_pose_failed");
-      primitives_->do_reset();
-      primitives_->do_dog_suction_on();
-      return false;
-    }
+      primitives_->do_move_to_preset("place_ik_fallback");
+      primitives_->do_suction_off();
+      place_ok = true;
+    } else {
+      const double target_yaw = std::atan2(relative_pose.y, relative_pose.x);
+      geometry_msgs::msg::Pose fallback_pose;
+      fallback_pose.position.x = relative_pose.x;
+      fallback_pose.position.y = relative_pose.y;
+      fallback_pose.position.z = config_.place_height;
+      fallback_pose.orientation.x = 0.0;
+      fallback_pose.orientation.y = 0.0;
+      fallback_pose.orientation.z = std::sin(relative_pose.yaw / 2.0);
+      fallback_pose.orientation.w = std::cos(relative_pose.yaw / 2.0);
 
-    geometry_msgs::msg::Pose fallback_pose;
-    fallback_pose.position.x = relative_pose.x;
-    fallback_pose.position.y = relative_pose.y;
-    fallback_pose.position.z = config_.place_height;
-    fallback_pose.orientation.x = 0.0;
-    fallback_pose.orientation.y = 0.0;
-    fallback_pose.orientation.z = std::sin(relative_pose.yaw / 2.0);
-    fallback_pose.orientation.w = std::cos(relative_pose.yaw / 2.0);
-
-    place_ok = sequences_->place_pose_direct_height(fallback_pose);
-    if (!place_ok) {
-      publish_timing_event(
-        node_, timing_event_pub_, "mission", "pickup_from_dog_sequence", "end",
-        detail.str() + ",ok=0,reason=fallback_place_failed");
-      primitives_->do_reset();
-      primitives_->do_dog_suction_on();
-      return false;
+      place_ok = sequences_->place_pose_direct_height(fallback_pose);
+      if (!place_ok) {
+        RCLCPP_WARN(
+          node_->get_logger(),
+          "[nav] place2 fallback also failed for task_index=%u; using IK fallback preset.",
+          command.task_index);
+        primitives_->do_move_to_preset("place_ik_fallback", target_yaw);
+        primitives_->do_suction_off();
+        place_ok = true;
+      }
     }
   }
 

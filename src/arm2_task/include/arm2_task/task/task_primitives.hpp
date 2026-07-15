@@ -48,6 +48,7 @@ public:
     double store_hover_offset{0.10};  // 狗背交接时悬停高度偏移 (m)
     double store_roll_offset{0.0};    // 放到狗吸盘时 joint_4 附加转角 (rad)
     double grasp_roll_offset{0.0};    // 抓取时 joint_4 roll 附加偏置 (rad)
+    int pick_samples{2};              // 感知采样次数（每阶段），减少则加快 pickup
     double dog_half_length{0.0};      // 狗体半长 (m)，从臂基座到狗前/后端的距离
     double box_half_length{0.0};      // 箱子半长 (m)，放置时箱子中心到边缘的距离
     double pre_place_velocity{0.3};   // pre_place_pivot 阶段的关节速度 (rad/s)，低速保证平滑
@@ -87,6 +88,7 @@ public:
   bool do_pre_place_pivot(const geometry_msgs::msg::Pose & target);
   void do_suction_on();
   void do_suction_off();
+  bool do_move_to_preset(const std::string & preset_name, double yaw_override = std::numeric_limits<double>::quiet_NaN());
 
   bool do_grasp_move(const geometry_msgs::msg::Pose & target, double tool_roll);
   bool do_grasp_move(const geometry_msgs::msg::Pose & target);

@@ -498,6 +498,27 @@ void TaskPrimitives::do_suction_off()
     ",mode_ok=" + timing_bool(mode_ok));
 }
 
+bool TaskPrimitives::do_move_to_preset(const std::string & preset_name, double yaw_override)
+{
+  if (!presets_ || !presets_->count(preset_name)) {
+    RCLCPP_WARN(node_->get_logger(), "[move_to_preset] Preset '%s' not found.", preset_name.c_str());
+    return false;
+  }
+  request_mode_switch("moving");
+  auto q = presets_->at(preset_name);
+  if (!std::isnan(yaw_override)) {
+    q[0] = yaw_override;
+    RCLCPP_INFO(node_->get_logger(), "[move_to_preset] Moving to '%s' with yaw=%.3f.", preset_name.c_str(), yaw_override);
+  } else {
+    RCLCPP_INFO(node_->get_logger(), "[move_to_preset] Moving to '%s'.", preset_name.c_str());
+  }
+  if (!send_move_goal(std::vector<Eigen::VectorXd>{q}) || !wait_for_action_completion()) {
+    RCLCPP_WARN(node_->get_logger(), "[move_to_preset] Move to '%s' failed.", preset_name.c_str());
+    return false;
+  }
+  return true;
+}
+
 bool TaskPrimitives::do_grasp_move(
   const geometry_msgs::msg::Pose & target,
   double tool_roll)
@@ -1065,20 +1086,21 @@ bool TaskPrimitives::do_grasp_from_current_view()
   request_mode_switch("moving");
   wait_joints_still(0.02, 200);
 
-  constexpr int kSamples = 3;
+  const int kSamples = config_.pick_samples;
+  // 第一阶段：单次采样确定粗方向，不需要多次
   std::vector<geometry_msgs::msg::Pose> samples;
   publish_timing_event(node_, timing_event_pub_, "perception", "pick_samples_current_view", "begin");
-  for (int i = 0; i < kSamples; ++i) {
+  {
     geometry_msgs::msg::Pose p;
     if (perception_client_->call_pick_service_sync(config_.pick_object_name, &p)) {
       samples.push_back(p);
     } else {
-      RCLCPP_WARN(node_->get_logger(), "[grasp_current_view] sample %d/%d failed", i + 1, kSamples);
+      RCLCPP_WARN(node_->get_logger(), "[grasp_current_view] initial sample failed");
     }
   }
   publish_timing_event(
     node_, timing_event_pub_, "perception", "pick_samples_current_view", "end",
-    "success_count=" + std::to_string(samples.size()) + ",sample_count=" + std::to_string(kSamples));
+    "success_count=" + std::to_string(samples.size()) + ",sample_count=1");
 
   if (samples.empty()) {
     RCLCPP_ERROR(node_->get_logger(), "[grasp_current_view] all perception samples failed.");

@@ -126,6 +126,7 @@ public:
     store_hover_offset_ = this->declare_parameter("task_store.hover_offset", 0.10);
     store_roll_offset_ = this->declare_parameter("task_store.roll_offset_deg", 0.0) * M_PI / 180.0;
     grasp_roll_offset_ = this->declare_parameter("task_step6.grasp_roll_offset_deg", 0.0) * M_PI / 180.0;
+    pick_samples_ = this->declare_parameter("task_step6.pick_samples", 2);
     stack_mock_z_ = this->declare_parameter("task_stack.mock_z", 0.1);
     stack_mock_yaw_ = this->declare_parameter("task_stack.mock_yaw", 0.0);
     dog_half_length_ = this->declare_parameter("task_place.dog_half_length", 0.0);
@@ -285,6 +286,7 @@ public:
     primitive_config.store_hover_offset = store_hover_offset_;
     primitive_config.store_roll_offset = store_roll_offset_;
     primitive_config.grasp_roll_offset = grasp_roll_offset_;
+    primitive_config.pick_samples = pick_samples_;
     primitive_config.dog_half_length = dog_half_length_;
     primitive_config.box_half_length = box_half_length_;
     primitive_config.pre_place_velocity = this->declare_parameter("task_place.pre_place_velocity", 0.3);
@@ -452,7 +454,7 @@ private:
 
   void load_presets()
   {
-    const std::vector<std::string> preset_names = {"reset", "look_out", "load", "carry", "store", "store_retreat", "pre_place", "place_ready"};
+    const std::vector<std::string> preset_names = {"reset", "look_out", "load", "carry", "store", "store_retreat", "pre_place", "place_ready", "place_ik_fallback"};
     for (const auto &name : preset_names)
     {
       const auto angles_deg =
@@ -567,6 +569,7 @@ private:
   double store_hover_offset_{0.10};
   double store_roll_offset_{0.0};
   double grasp_roll_offset_{0.0};
+  int pick_samples_{2};
   double dog_half_length_{0.0};
   double box_half_length_{0.0};
   bool stack_use_mock_{false};
