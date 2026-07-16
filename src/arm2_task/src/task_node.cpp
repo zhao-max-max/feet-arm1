@@ -454,7 +454,7 @@ private:
 
   void load_presets()
   {
-    const std::vector<std::string> preset_names = {"reset", "look_out", "load", "carry", "store", "store_retreat", "pre_place", "place_ready", "place_ik_fallback"};
+    const std::vector<std::string> preset_names = {"reset", "look_out", "load", "carry", "store", "store_retreat", "pre_place", "place_ready"};
     for (const auto &name : preset_names)
     {
       const auto angles_deg =

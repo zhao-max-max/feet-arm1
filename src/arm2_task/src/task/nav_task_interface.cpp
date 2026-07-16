@@ -812,13 +812,9 @@ bool NavTaskInterface::do_place_sequence(const MissionCommand & command){
       if (!compute_command_relative_pose(command, &relative_pose)) {
         RCLCPP_WARN(
           node_->get_logger(),
-          "[nav] Place fallback failed: unable to compute arm-relative pose for task_index=%u; using IK fallback preset.",
+          "[nav] Place fallback failed: unable to compute arm-relative pose for task_index=%u.",
           command.task_index);
-        primitives_->do_move_to_preset("place_ik_fallback");
-        primitives_->do_suction_off();
-        place_ok = true;
       } else {
-        const double target_yaw = std::atan2(relative_pose.y, relative_pose.x);
         geometry_msgs::msg::Pose fallback_pose;
         fallback_pose.position.x = relative_pose.x;
         fallback_pose.position.y = relative_pose.y;
@@ -838,17 +834,25 @@ bool NavTaskInterface::do_place_sequence(const MissionCommand & command){
           relative_pose.yaw);
 
         place_ok = sequences_->place_pose_direct_height(fallback_pose);
-        if (!place_ok) {
-          RCLCPP_WARN(
-            node_->get_logger(),
-            "[nav] Place fallback also failed for task_index=%u; using IK fallback preset.",
-            command.task_index);
-          primitives_->do_move_to_preset("place_ik_fallback", target_yaw);
-          primitives_->do_suction_off();
-          place_ok = true;
-        }
       }
     }
+  }
+
+  if (!place_ok) {
+    RCLCPP_WARN(
+      node_->get_logger(),
+      "[nav] Place IK failed for task_index=%u; extending to fallback position (0, 0.40, 0.10).",
+      command.task_index);
+    geometry_msgs::msg::Pose fallback_pose;
+    fallback_pose.position.x = 0.0;
+    fallback_pose.position.y = 0.40;
+    fallback_pose.position.z = 0.10;
+    fallback_pose.orientation.w = 1.0;
+    if (!primitives_->do_place_move_with_direct_height(fallback_pose)) {
+      RCLCPP_WARN(node_->get_logger(), "[nav] Fallback IK also failed; forcing suction off.");
+      primitives_->do_suction_off();
+    }
+    place_ok = true;
   }
 
   ++completed_place_count_;
@@ -930,13 +934,9 @@ bool NavTaskInterface::do_pickup_from_dog_sequence(const MissionCommand & comman
     if (!compute_command_relative_pose(command, &relative_pose)) {
       RCLCPP_WARN(
         node_->get_logger(),
-        "[nav] place2 fallback failed: unable to compute arm-relative pose for task_index=%u; using IK fallback preset.",
+        "[nav] place2 fallback failed: unable to compute arm-relative pose for task_index=%u.",
         command.task_index);
-      primitives_->do_move_to_preset("place_ik_fallback");
-      primitives_->do_suction_off();
-      place_ok = true;
     } else {
-      const double target_yaw = std::atan2(relative_pose.y, relative_pose.x);
       geometry_msgs::msg::Pose fallback_pose;
       fallback_pose.position.x = relative_pose.x;
       fallback_pose.position.y = relative_pose.y;
@@ -947,16 +947,24 @@ bool NavTaskInterface::do_pickup_from_dog_sequence(const MissionCommand & comman
       fallback_pose.orientation.w = std::cos(relative_pose.yaw / 2.0);
 
       place_ok = sequences_->place_pose_direct_height(fallback_pose);
-      if (!place_ok) {
-        RCLCPP_WARN(
-          node_->get_logger(),
-          "[nav] place2 fallback also failed for task_index=%u; using IK fallback preset.",
-          command.task_index);
-        primitives_->do_move_to_preset("place_ik_fallback", target_yaw);
-        primitives_->do_suction_off();
-        place_ok = true;
-      }
     }
+  }
+
+  if (!place_ok) {
+    RCLCPP_WARN(
+      node_->get_logger(),
+      "[nav] place2 IK failed for task_index=%u; extending to fallback position (0, 0.40, 0.10).",
+      command.task_index);
+    geometry_msgs::msg::Pose fallback_pose;
+    fallback_pose.position.x = 0.0;
+    fallback_pose.position.y = 0.40;
+    fallback_pose.position.z = 0.10;
+    fallback_pose.orientation.w = 1.0;
+    if (!primitives_->do_place_move_with_direct_height(fallback_pose)) {
+      RCLCPP_WARN(node_->get_logger(), "[nav] place2 fallback IK also failed; forcing suction off.");
+      primitives_->do_suction_off();
+    }
+    place_ok = true;
   }
 
   primitives_->do_reset();
